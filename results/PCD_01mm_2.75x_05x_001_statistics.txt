@@ -1,0 +1,39 @@
+Optical Profilometry Analysis
+File: ceramics\PCD_01mm_2.75x_05x_001.xyz
+Resolution Factor: 1x
+Interpolation Method: bilinear
+Processed Size: (1024, 1024)
+
+============================================================
+HEADER METADATA
+============================================================
+
+Lateral Sampling: 0.500 µm/pixel
+Vertical Scale: 0.578416 µm/unit
+Wavelength Parameter: 0.08
+Coherence Flag: 1
+Noise Floor Estimate: 5.880290e-06
+Acquisition Time: 2026-02-09 11:45:22
+
+============================================================
+STATISTICAL ANALYSIS
+============================================================
+
+Data Coverage:
+  Total points:   1,048,576
+  Valid points:   1,048,576
+  Missing points: 0
+  Coverage:       100.00%
+
+Height Statistics (µm):
+  Min:            5.424146
+  Max:            24.530035
+  Range:          19.105889
+  Mean:           14.357093
+  Median:         14.493928
+  Std Dev:        3.604031
+
+Surface Roughness Parameters (µm):
+  Ra (avg roughness):     2.880977
+  Rq (RMS roughness):     3.604031
+  Rz (max height):        19.105889
