@@ -2,6 +2,12 @@
 
 This directory contains tools for analyzing and visualizing optical profilometry XYZ data files from ceramic surface measurements.
 
+## Example: 
+
+![alt text](exports/PCD_01mm_2.75x_05x_001_analysis.png)
+
+![fresnel render](exports/fresnel-render.png)
+
 ## Files
 
 - **`analyze_profilometry.py`** - Main analysis script
