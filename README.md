@@ -1,12 +1,20 @@
-# Optical Profilometry Data Analysis
+# Optical Profilometry Analysis Pipeline
 
-This directory contains tools for analyzing and visualizing optical profilometry XYZ data files from ceramic surface measurements.
+This directory contains a python pipeline for analyzing and visualizing optical profilometry .xyz data.
 
-## Example: 
+---
 
-![alt text](exports/PCD_01mm_2.75x_05x_001_analysis.png)
+## Example exports: 
 
+### Cross-hatch surface
+![crosshatch](exports/crosshatch_1.png)
+
+---
+
+### 3D rendering
 ![fresnel render](exports/fresnel-render.png)
+
+---
 
 ## Files
 
@@ -172,11 +180,13 @@ The XYZ files have the following structure:
 - **Header**: 14 lines of metadata (includes pixel spacing information)
 - **Data**: Lines with format `X Y Z` or `X Y No Data`
   - X, Y: Integer coordinates (0-1023)
-  - Z: Height value (float, in µm) or "No Data" for missing measurements
+    - it is not clear as of this commit (2/10/26) how to translate this into physical distance.  The values that result from the header scalar do not match intuition (the line spacing should be ~100 microns)
+  - Z: Height value
+    - it is not yet totally clear as of this commit (2/10/26) if these values are in um or if the header contains the scalar from meters which would differe by a factor of ~5)
 
-## Interpolation Methods
+## Interpolation Methods for NaN Points
 
-### Bilinear
+### Bilinear (recommended)
 - Fast linear interpolation using scipy's griddata
 - Falls back to nearest neighbor for edge/corner points
 - **Best for**: General use, quick analysis
@@ -190,10 +200,10 @@ The XYZ files have the following structure:
 ### Kriging (RBF-based)
 - Uses thin-plate spline radial basis functions
 - Produces very smooth interpolations
-- Computationally expensive (limited to 5000 points for speed)
+- Computationally expensive
 - **Best for**: High-quality visualization with smooth surfaces
 
-## Performance Tips
+## Downsampling and other performance flags
 
 - Use `-r 4` or `-r 8` for initial exploration (much faster)
 - Use `-r 1` (full resolution) only when you need detailed analysis
@@ -220,44 +230,24 @@ py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_002.xyz -r 4 --stats-only
 py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_003.xyz -r 4 --stats-only
 ```
 
+---
+
 ## Notes
 
-- Missing data points ("No Data" in files) are handled as NaN values
-- Interpolation fills NaN values before surface decomposition and visualization
+- Interpolation fills NaN values *before* surface decomposition and visualization
 - Downsampling uses mean pooling (averaging valid points in each block)
-- **3D visualization and cross-sections display roughness component** for detailed texture analysis
-- All statistics are computed only on valid (non-NaN) data points
-- Pixel spacing and vertical scale factor extracted from header line 8
-- Surface decomposition uses:
-  - 2nd order polynomial for form removal
-  - Gaussian filter with 0.8mm cutoff for waviness
-  - Residual for roughness calculation
+- Statistics should be computed only on valid (non-NaN) data points (**double check this is accurate**)
+- Pixel spacing and vertical scale factor extracted from header line 8 (**still figuring out if this is correct**)
+- A pixel size of ~0.5 um puts the Nyquist resolution at ~1 um.  
+- Surface decomposition:
+  - **form:** 2nd order polynomial
+  - **waviness:** Gaussian filter with 0.8mm cutoff (after subtracting form)
+  - **roughness:** Residual (after removing form and waviness)
 
 ## Limitations and Considerations
 
 ### ⚠️ Noise Floor
-The instrument has a fundamental noise floor (typically ~5-6 µm, see "Noise Floor Estimate" in statistics output). This sets the limit on measurable surface features:
-
-- **Features smaller than the noise floor may not be reliable**
-- Can artificially inflate high-frequency content in roughness measurements
-- Ra/Rq values should be compared to noise floor for context
-
-**Recommendations:**
-- Check the noise floor value in the HEADER METADATA section of the statistics file
-- Features with amplitudes < 2× noise floor should be interpreted cautiously
-- Consider filtering or smoothing if high-frequency noise dominates the roughness
-
-### ⚠️ Nyquist Sampling and Aliasing
-With pixel spacing of **0.5 µm**, the **Nyquist limit is ~1 µm wavelength** (f_max = 1/(2Δx)):
-
-- Spatial features with wavelengths **< ~1 µm cannot be properly resolved**
-- High-frequency features may appear as lower-frequency artifacts (aliasing)
-- The roughness component may include aliased content near the Nyquist limit
-
-**Recommendations:**
-- Treat features with wavelengths < 2 µm (< 4× pixel spacing) with caution
-- The 0.8mm waviness cutoff is well above Nyquist, so waviness is reliable
-- For analysis of fine features, ensure they are well-sampled (wavelength > 4-5 pixels)
+If I'm interpreting the header info correctly (it's unlabeled, so maybe not), the instrument has a noise floor of a few microns, which sets the limit on measurable surface features.  Ra/Rq values should be compared to noise floor for if this is true.
 
 ### ⚠️ Instrument Transfer Function (MTF)
 The optical profilometer's response varies with spatial frequency:
@@ -284,7 +274,66 @@ The optical profilometer's response varies with spatial frequency:
 
 **Always report measurement conditions** (pixel spacing, noise floor, coherence mode) when sharing results!
 
+# Current Data
+
+## Standard - 100 um scan interval (1)
+
+![alt text](exports/standard_1.png)
+
+## Standard - 100 um scan interval (2)
+
+![alt text](exports/standard_2.png)
+
+## Standard - 100 um scan interval (3)
+
+![alt text](exports/standard_3.png)
+
+---
+
+## ? (1)
+
+![alt text](exports/PCD_01mm_2.75x_05x_001.png)
+
+## ? (2)
+
+![alt text](exports/PCD_01mm_2.75x_05x_002.png)
+
+## ? (3)
+
+![alt text](exports/PCD_01mm_2.75x_05x_003.png)
+
+---
+
+## Cross-hatch (1)
+
+![alt text](exports/crosshatch_1.png)
+
+## Cross-hatch (2)
+
+![alt text](exports/crosshatch_2.png)
+
+## Cross-hatch (3)
+
+![alt text](exports/crosshatch_3.png)
+
+---
+
+## 2x line density (1)
+
+![2x line density (1)](exports/2x-line-density_1.png)
+
+## 2x line density (2)
+
+![2x line density (2)](exports/2x-line-density_2.png)
+
+## 2x line density (3)
+
+![2x line density (3)](exports/2x-line-density_3.png)
+
+---
+
 ## To-do
+- re-evaluate the xy pixel intervals — the images seem way too big for the units (~50 um lines are like 5 um)
 - subtract DC before form?  Should I consider the first big jump in the heights histogram to be the DC offset?
 - additional figures
   - 3D zoomed in on a single line trough pair
@@ -299,7 +348,7 @@ The optical profilometer's response varies with spatial frequency:
   - instrument's transfer function (objective NA, coherence mode, lateral resolution chaning at high $f$)
 
 ### spatial wavelength regimes considerations
-- just consider thresholds for waviness
+- currently just playing with upper and lower bounds for waviness
 - consider migrating paradigms
 - power spectral density (PSD)
     - detrend/level (remove piston and tilt)
