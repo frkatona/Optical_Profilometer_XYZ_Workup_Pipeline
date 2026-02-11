@@ -554,16 +554,16 @@ def create_visualizations(data, metadata, stats, output_dir=None):
     ax1.set_ylabel('Y Position (µm)')
     cbar1 = plt.colorbar(im1, ax=ax1, label='Height (µm)')
     
-    # 2. Height Distribution Histogram
+    # 2. Roughness Distribution (changed from height distribution)
     ax2 = plt.subplot(3, 3, 2)
-    valid_data = data[~np.isnan(data)]
-    ax2.hist(valid_data, bins=100, color='steelblue', alpha=0.7, edgecolor='black')
-    ax2.axvline(stats['mean'], color='red', linestyle='--', linewidth=2, 
-                label=f"Mean: {stats['mean']:.2f} µm")
-    ax2.axvline(stats['median'], color='green', linestyle='--', linewidth=2, 
-                label=f"Median: {stats['median']:.2f} µm")
-    ax2.set_title('Height Distribution', fontsize=14, fontweight='bold')
-    ax2.set_xlabel('Height (µm)')
+    valid_roughness = roughness[~np.isnan(roughness)]
+    ax2.hist(valid_roughness, bins=100, color='steelblue', alpha=0.7, edgecolor='black')
+    ax2.axvline(np.nanmean(roughness), color='red', linestyle='--', linewidth=2, 
+                label=f"Mean: {np.nanmean(roughness):.2f} µm")
+    ax2.axvline(np.nanmedian(roughness), color='green', linestyle='--', linewidth=2, 
+                label=f"Median: {np.nanmedian(roughness):.2f} µm")
+    ax2.set_title('Roughness Distribution', fontsize=14, fontweight='bold')
+    ax2.set_xlabel('Roughness (µm)')
     ax2.set_ylabel('Frequency')
     ax2.legend()
     ax2.grid(True, alpha=0.3)
@@ -597,14 +597,14 @@ def create_visualizations(data, metadata, stats, output_dir=None):
     X, Y = np.meshgrid(x_um, y_um)
     
     # Create surface plot of roughness
-    surf = ax4.plot_surface(X, Y, plot_roughness, cmap='RdBu_r', 
-                           linewidth=0, antialiased=True, alpha=0.8,
+    surf = ax4.plot_surface(X, Y, plot_roughness, cmap='viridis', 
+                           linewidth=0, antialiased=True, alpha=0.9,
                            vmin=-np.nanstd(roughness)*3, vmax=np.nanstd(roughness)*3)
     ax4.set_title('3D Roughness Visualization', fontsize=14, fontweight='bold')
     ax4.set_xlabel('X Position (µm)')
     ax4.set_ylabel('Y Position (µm)')
     ax4.set_zlabel('Roughness (µm)')
-    ax4.view_init(elev=30, azim=45)
+    ax4.view_init(elev=30, azim=45)  # 45 degree azimuth angle
     
     # 5. Cross-section profiles - ROUGHNESS
     ax5 = plt.subplot(3, 3, 5)

@@ -27,12 +27,12 @@ This directory contains a python pipeline for analyzing and visualizing optical 
 pip install numpy matplotlib scipy
 ```
 
-## New Features ✨
+## How it works
 
 ### 1. **NaN Interpolation Methods**
-- **Bilinear**: Fast linear interpolation (good for most cases)
-- **Laplacian**: Iterative method solving Laplace equation (excellent for edges/corners)
-- **Kriging**: RBF-based smooth interpolation (slower but very smooth)
+- **Bilinear**: Fast 2D linear interpolation (fastest)
+- **Laplacian**: Laplace equation smooth interpolation (slow)
+- **Kriging**: RBF-based smooth interpolation (slowest)
 
 ### 2. **Surface Decomposition**
 Automatically separates the surface into:
@@ -40,114 +40,11 @@ Automatically separates the surface into:
 - **Waviness**: Medium-scale features (Gaussian filtered, ~0.8mm cutoff)
 - **Roughness**: Fine-scale texture (residual after form & waviness removal)
 
-### 3. **Micron-Based Units**
-All axes and measurements now use microns (µm) instead of pixels
+### 3. **Downsampling**
+Optionally resolution for faster processing (2x, 4x, 8x, 16x, 32x).  Also optionally skip the visualizer rendering
 
-## Usage
-
-### Basic Analysis
-
-```bash
-# Quick analysis with 4x downsampling (recommended)
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4
-
-# Full resolution analysis
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz
-```
-
-### With Interpolation (NEW!)
-
-```bash
-# Bilinear interpolation (fast, good for most cases)
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear
-
-# Laplacian interpolation (best for edge/corner handling)
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i laplacian
-
-# Kriging interpolation (slowest, smoothest results)
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i kriging
-```
-
-### Fast Processing
-
-For faster processing, use the `-r` flag to downsample the data:
-
-```bash
-# 4x downsampling (256×256) - recommended for quick analysis
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4
-
-# 8x downsampling (128×128) - very fast
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 8
-
-# 16x downsampling (64×64) - extremely fast
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 16
-```
-
-### Save Results to Directory
-
-```bash
-# Save visualizations and statistics to 'results' folder
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear -o results/
-```
-
-### Statistics Only (No Visualization)
-
-```bash
-# Just compute and print statistics
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 --stats-only
-```
-
-### Batch Processing Example
-
-Process all files in the ceramics directory:
-
-```bash
-# Windows PowerShell
-Get-ChildItem ceramics\*.xyz | ForEach-Object { py analyze_profilometry.py $_.FullName -r 4 -i bilinear -o results/ --no-display }
-```
-
-## Output
-
-### Statistics
-
-The script computes:
-
-- **Data Coverage**: Total points, valid points, missing points, coverage percentage
-- **Height Statistics**: Min, max, range, mean, median, standard deviation, percentiles
-- **Surface Roughness Parameters**:
-  - **Ra**: Average roughness (mean absolute deviation)
-  - **Rq**: RMS roughness (root mean square deviation)
-  - **Rz**: Maximum height (peak-to-valley)
-
-
-### Visualizations (9-Panel Figure)
-
-**Row 1 - Original Data:**
-1. **2D Height Map** - Color-coded surface topography (µm)
-2. **Height Distribution** - Histogram with mean and median markers (µm)
-3. **Data Coverage Map** - Shows valid vs. missing data points
-
-**Row 2 - Roughness Detail:**
-4. **3D Roughness Visualization** - Interactive 3D surface plot of **roughness component** (µm)
-5. **Roughness Cross-Section Profiles** - Horizontal and vertical line profiles of **roughness** (µm)
-6. **Surface Gradient Map** - Shows slope/gradient magnitude
-
-**Row 3 - Surface Decomposition:**
-7. **Form** - Large-scale shape (polynomial fit)
-8. **Waviness** - Medium-scale features (~0.8mm wavelength cutoff)
-9. **Roughness** - Fine-scale texture
-
-### Export to Blender
-
-```bash
-# Export roughness map as OBJ file for 3D visualization in Blender
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear --export-obj -o results/
-
-# The OBJ file can be imported directly into Blender:
-# File > Import > Wavefront (.obj) > Select *_roughness.obj
-```
-
-The exported OBJ file contains the roughness surface as a triangular mesh with units in millimeters.
+### 4. **Export to Blender**
+Optionally export roughness map as OBJ file for 3D visualization in Blender
 
 ## Command-Line Options
 
@@ -174,11 +71,50 @@ optional arguments:
   --stats-only          Only compute and print statistics, skip visualization
 ```
 
+## Example Usage
+
+```bash
+# Quick analysis with 4x downsampling (recommended)
+py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4
+
+# Full resolution analysis
+py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz
+
+# Bilinear interpolation (fast, good for most cases)
+py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear
+
+# Laplacian interpolation (best for edge/corner handling)
+py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i laplacian
+
+# Kriging interpolation (slowest, smoothest results)
+py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i kriging
+
+# 4x downsampling (256×256) - recommended for quick analysis
+py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4
+
+# 8x downsampling (128×128) - very fast
+py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 8
+
+# 16x downsampling (64×64) - extremely fast
+py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 16
+
+# Save visualizations and statistics to 'results' folder
+py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear -o results/
+
+# Just compute and print statistics
+py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 --stats-only
+
+# Export roughness map as OBJ file for 3D visualization in Blender
+py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear --export-obj -o results/
+
+# Windows PowerShell Batch Processing
+Get-ChildItem ceramics\*.xyz | ForEach-Object { py analyze_profilometry.py $_.FullName -r 4 -i bilinear -o results/ --no-display }
+```
 ## Data Format
 
 The XYZ files have the following structure:
-- **Header**: 14 lines of metadata (includes pixel spacing information)
-- **Data**: Lines with format `X Y Z` or `X Y No Data`
+- **Header**: 14 lines of metadata
+- **Data**: Lines with format `X Y Z`, where some Z are NaN
   - X, Y: Integer coordinates (0-1023)
     - it is not clear as of this commit (2/10/26) how to translate this into physical distance.  The values that result from the header scalar do not match intuition (the line spacing should be ~100 microns)
   - Z: Height value
@@ -244,36 +180,6 @@ py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_003.xyz -r 4 --stats-only
   - **waviness:** Gaussian filter with 0.8mm cutoff (after subtracting form)
   - **roughness:** Residual (after removing form and waviness)
 
-## Limitations and Considerations
-
-### ⚠️ Noise Floor
-If I'm interpreting the header info correctly (it's unlabeled, so maybe not), the instrument has a noise floor of a few microns, which sets the limit on measurable surface features.  Ra/Rq values should be compared to noise floor for if this is true.
-
-### ⚠️ Instrument Transfer Function (MTF)
-The optical profilometer's response varies with spatial frequency:
-
-- **Lateral resolution** limited by objective NA and wavelength (~1-2 µm typical)
-- **Coherence mode** (flag in header) affects edge sharpness
-- **MTF attenuation** reduces measured amplitudes at high spatial frequencies
-- Sharp edges and fine features appear smoothed
-
-**Recommendations:**
-- Spatial frequencies approaching the diffraction limit are attenuated
-- Actual surface roughness may be **higher** than measured for high-f content
-- Use the coherence flag (in header metadata) to understand measurement mode
-- For critical measurements, validate against known standards
-
-### Spatial Frequency Reliability Guide
-
-| Wavelength Range | Reliability | Components | Notes |
-|------------------|-------------|------------|-------|
-| > 100 µm | ✅ Excellent | Form, Waviness | Well above all limits |
-| 10-100 µm | ✅ Good | Waviness, Coarse Roughness | Reliable measurements |
-| 2-10 µm | ⚠️ Caution | Medium Roughness | Check noise floor, MTF affects amplitude |
-| < 2 µm | ❌ Unreliable | Fine Roughness | Near Nyquist, MTF attenuation, aliasing |
-
-**Always report measurement conditions** (pixel spacing, noise floor, coherence mode) when sharing results!
-
 # Current Data
 
 ## Standard - 100 um scan interval (1)
@@ -331,6 +237,21 @@ The optical profilometer's response varies with spatial frequency:
 ![2x line density (3)](exports/2x-line-density_3.png)
 
 ---
+
+# Other notes
+
+## Noise floor
+
+If I'm interpreting the header info correctly (it's unlabeled, so maybe not), the instrument has a noise floor of a few microns, which sets the limit on measurable surface features.  Ra/Rq values should be compared to noise floor for if this is true.
+
+## MSC's Profilometer Description
+
+> ### Zygo Nexview 3D Optical Surface Profiler:
+> White Light Interferometry.
+> 2.5x, 10x, 20x, 50x objectives with 0.5x, 1x, 2x internal magnification.
+> Automated image stitching.
+> 200mm XY stage and 100mm Z clearance with capacity for up to 10lbs.
+> A white light interferometer is a type of profilometer in which light from a lamp is split into two paths by a beam splitter. One path directs the light onto the surface under test, the other path directs the light to a reference mirror. Reflections from the two surfaces are recombined and projected onto an array detector. When the path difference between the recombined beams is on the order of a few wavelengths of light or less, interference can occur. This interference contains information about the surface contours of the test surface. Vertical resolution can be on the order of several angstroms while lateral resolution depends upon the system and objective and is typically in the range of 0.26um – 4.4um.
 
 ## To-do
 - re-evaluate the xy pixel intervals — the images seem way too big for the units (~50 um lines are like 5 um)
