@@ -274,3 +274,42 @@ interpolation
 > Automated image stitching.
 > 200mm XY stage and 100mm Z clearance with capacity for up to 10lbs.
 > A white light interferometer is a type of profilometer in which light from a lamp is split into two paths by a beam splitter. One path directs the light onto the surface under test, the other path directs the light to a reference mirror. Reflections from the two surfaces are recombined and projected onto an array detector. When the path difference between the recombined beams is on the order of a few wavelengths of light or less, interference can occur. This interference contains information about the surface contours of the test surface. Vertical resolution can be on the order of several angstroms while lateral resolution depends upon the system and objective and is typically in the range of 0.26um – 4.4um.
+
+---
+
+# Synthetic Interpolation Study
+
+The script `interpolation_study.py` provides a framework for validating interpolation strategies on synthetic 128x128 surfaces. It simulates realistic profilometry artifacts including stepped geometries and various noise distributions.
+
+## Interpolation Methods & Formulae
+
+### 1. Nearest Neighbor
+Assigns the value of the visually closest data point.
+$$f(x, y) = f(x_i, y_i) \quad \text{where} \quad \sqrt{(x-x_i)^2 + (y-y_i)^2} \text{ is minimized}$$
+
+### 2. Bilinear Interpolation
+A linear extension of 1D interpolation, estimating the value based on the four nearest neighbors.
+$$f(x, y) \approx a_0 + a_1 x + a_2 y + a_3 xy$$
+
+### 3. Bicubic Interpolation
+Uses a third-degree polynomial (cubic spline) for smoother transitions, utilizing a $4 \times 4$ neighborhood.
+$$f(x, y) = \sum_{i=0}^3 \sum_{j=0}^3 a_{ij} x^i y^j$$
+
+### 4. Laplacian Diffusion
+Solves the steady-state diffusion (Laplace) equation to fill holes, ensuring a "smooth" harmonic transition.
+$$\nabla^2 f = \frac{\partial^2 f}{\partial x^2} + \frac{\partial^2 f}{\partial y^2} = 0$$
+
+### 5. Kriging / RBF (Radial Basis Function)
+Computes a weighted sum of basis functions centered at valid data points. The script defaults to the **Thin Plate Spline** kernel.
+$$f(\mathbf{x}) = \sum_{i=1}^n w_i \phi(\|\mathbf{x} - \mathbf{x}_i\|) + P(\mathbf{x})$$
+Where the Thin Plate Spline kernel is defined as:
+$$\phi(r) = r^2 \ln(r)$$
+
+## Features
+- **Noise Models**: Gaussian (Additive), Poisson (Shot), and Speckle (Multiplicative).
+- **Visualization**: Generates `comparison_<noise>_<mask_type>.png` plots showing Ground Truth, Masked Input, Reconstructions, and Difference Maps ($|Original - Reconstructed|$).
+
+## Usage
+```bash
+py interpolation_study.py
+```
