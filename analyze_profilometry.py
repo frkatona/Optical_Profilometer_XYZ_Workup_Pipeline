@@ -513,7 +513,7 @@ def print_statistics(stats):
     print("="*60 + "\n")
 
 
-def create_visualizations(data, metadata, stats, output_dir=None):
+def create_visualizations(data, metadata, stats, output_dir=None, original_data=None):
     """
     Create comprehensive visualizations of the profilometry data.
     
@@ -527,6 +527,8 @@ def create_visualizations(data, metadata, stats, output_dir=None):
         Statistical measures
     output_dir : str or Path, optional
         Directory to save figures. If None, displays interactively.
+    original_data : np.ndarray, optional
+        Original data before interpolation (for coverage map)
     """
     print("Creating visualizations...")
     
@@ -571,42 +573,43 @@ def create_visualizations(data, metadata, stats, output_dir=None):
     ax2.legend()
     ax2.grid(True, alpha=0.3)
     
-    # 3. Data Coverage Map
+    # 3. Data Coverage Map (before interpolation)
     ax3 = plt.subplot(3, 3, 3)
-    coverage_map = ~np.isnan(data)
+    # Use original data before interpolation for coverage map
+    data_for_coverage = original_data if original_data is not None else data
+    coverage_map = ~np.isnan(data_for_coverage)
     im3 = ax3.imshow(coverage_map, cmap='RdYlGn', origin='lower', interpolation='nearest',
                      extent=extent_um)
-    ax3.set_title(f'Data Coverage Map ({stats["coverage_percent"]:.1f}%)', 
+    ax3.set_title(f'Data Coverage (Before Interpolation) ({stats["coverage_percent"]:.1f}%)', 
                   fontsize=14, fontweight='bold')
     ax3.set_xlabel('X Position (µm)')
     ax3.set_ylabel('Y Position (µm)')
     plt.colorbar(im3, ax=ax3, label='Valid Data', ticks=[0, 1])
     
-    # Row 2: 3D and profiles (using ROUGHNESS for detailed texture analysis)
-    # 4. 3D Surface Plot - ROUGHNESS
+    # Row 2: 3D and profiles
+    # 4. 3D Surface Plot - Original Height Map
     ax4 = plt.subplot(3, 3, 4, projection='3d')
     
     # Downsample for 3D plot if data is large
-    plot_factor = max(1, roughness.shape[0] // 200)
+    plot_factor = max(1, data.shape[0] // 200)
     if plot_factor > 1:
-        plot_roughness = roughness[::plot_factor, ::plot_factor]
+        plot_data = data[::plot_factor, ::plot_factor]
         plot_spacing = pixel_spacing_um * plot_factor
     else:
-        plot_roughness = roughness
+        plot_data = data
         plot_spacing = pixel_spacing_um
     
-    x_um = np.arange(plot_roughness.shape[1]) * plot_spacing
-    y_um = np.arange(plot_roughness.shape[0]) * plot_spacing
+    x_um = np.arange(plot_data.shape[1]) * plot_spacing
+    y_um = np.arange(plot_data.shape[0]) * plot_spacing
     X, Y = np.meshgrid(x_um, y_um)
     
-    # Create surface plot of roughness
-    surf = ax4.plot_surface(X, Y, plot_roughness, cmap='viridis', 
-                           linewidth=0, antialiased=True, alpha=0.9,
-                           vmin=-np.nanstd(roughness)*3, vmax=np.nanstd(roughness)*3)
-    ax4.set_title('3D Roughness Visualization', fontsize=14, fontweight='bold')
+    # Create surface plot of original height data
+    surf = ax4.plot_surface(X, Y, plot_data, cmap='viridis', 
+                           linewidth=0, antialiased=True, alpha=0.9)
+    ax4.set_title('3D Height Map', fontsize=14, fontweight='bold')
     ax4.set_xlabel('X Position (µm)')
     ax4.set_ylabel('Y Position (µm)')
-    ax4.set_zlabel('Roughness (µm)')
+    ax4.set_zlabel('Height (µm)')
     ax4.view_init(elev=30, azim=45)  # 45 degree azimuth angle
     
     # 5. Cross-section profiles - ROUGHNESS
@@ -743,6 +746,8 @@ Examples:
                        help='Do not display plots interactively (only save)')
     parser.add_argument('--stats-only', action='store_true',
                        help='Only compute and print statistics, skip visualization')
+    parser.add_argument('--bounds', type=float, nargs=4, metavar=('X1', 'X2', 'Y1', 'Y2'),
+                       help='Crop image bounds in microns (x1 x2 y1 y2)')
     
     args = parser.parse_args()
     
@@ -754,6 +759,35 @@ Examples:
     
     # Load data
     data, metadata = load_xyz_file(input_path, args.resolution_factor)
+    
+    # Apply bounds cropping if requested
+    if args.bounds:
+        x1_um, x2_um, y1_um, y2_um = args.bounds
+        pixel_spacing_um = metadata['pixel_spacing_um']
+        
+        # Convert microns to pixel indices
+        x1_px = int(x1_um / pixel_spacing_um)
+        x2_px = int(x2_um / pixel_spacing_um)
+        y1_px = int(y1_um / pixel_spacing_um)
+        y2_px = int(y2_um / pixel_spacing_um)
+        
+        # Validate bounds
+        if x1_px < 0 or x2_px > data.shape[1] or y1_px < 0 or y2_px > data.shape[0]:
+            print(f"Warning: Bounds exceed data dimensions. Data size: {data.shape[1]*pixel_spacing_um:.0f}x{data.shape[0]*pixel_spacing_um:.0f} µm")
+            print(f"Requested bounds: x=[{x1_um:.0f}, {x2_um:.0f}] µm, y=[{y1_um:.0f}, {y2_um:.0f}] µm")
+        if x1_px >= x2_px or y1_px >= y2_px:
+            print(f"Error: Invalid bounds. x1 must be < x2 and y1 must be < y2")
+            return 1
+        
+        # Crop the data
+        data = data[y1_px:y2_px, x1_px:x2_px]
+        print(f"Cropped to bounds: x=[{x1_um:.0f}, {x2_um:.0f}] µm, y=[{y1_um:.0f}, {y2_um:.0f}] µm")
+        print(f"Cropped size: {data.shape[1]}x{data.shape[0]} pixels")
+        metadata['bounds'] = (x1_um, x2_um, y1_um, y2_um)
+        metadata['bounds_px'] = (x1_px, x2_px, y1_px, y2_px)
+    
+    # Store original data before interpolation (for coverage map)
+    original_data = data.copy()
     
     # Apply interpolation if requested
     if args.interpolate:
@@ -821,7 +855,7 @@ Examples:
     # Create visualizations unless stats-only mode
     if not args.stats_only:
         output_dir = args.output_dir if args.output_dir or args.no_display else None
-        create_visualizations(data, metadata, stats, output_dir)
+        create_visualizations(data, metadata, stats, output_dir, original_data=original_data)
         
         if not args.no_display and not args.output_dir:
             print("\nDisplaying interactive plots...")

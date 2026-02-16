@@ -35,10 +35,124 @@ pip install numpy matplotlib scipy
 - **Kriging**: RBF-based smooth interpolation (slowest)
 
 ### 2. **Surface Decomposition**
-Automatically separates the surface into:
+
+The surface decomposition separates the measured height map into three physically meaningful components that correspond to different spatial frequency regimes:
+
 - **Form**: Large-scale shape (polynomial fit)
 - **Waviness**: Medium-scale features (Gaussian filtered, ~0.8mm cutoff)
 - **Roughness**: Fine-scale texture (residual after form & waviness removal)
+
+#### Implementation Details and Design Choices
+
+The decomposition is performed by the `decompose_surface()` function in three sequential steps:
+
+##### Step 1: Form Extraction (Large-Scale Shape)
+
+**Code:**
+```python
+# 1. Form: Fit a 2nd order polynomial surface (large-scale shape)
+y_coords, x_coords = np.mgrid[0:data.shape[0], 0:data.shape[1]]
+
+# Flatten and get valid points
+x_flat = x_coords[valid_mask]
+y_flat = y_coords[valid_mask]
+z_flat = data[valid_mask]
+
+# Fit polynomial: z = a + bx + cy + dxx + eyy + fxy
+if len(z_flat) > 6:
+    A = np.column_stack([
+        np.ones_like(x_flat),
+        x_flat, y_flat,
+        x_flat**2, y_flat**2,
+        x_flat * y_flat
+    ])
+    
+    coeffs, _, _, _ = np.linalg.lstsq(A, z_flat, rcond=None)
+    
+    # Evaluate polynomial on full grid
+    A_full = np.column_stack([
+        np.ones(x_coords.size),
+        x_coords.ravel(), y_coords.ravel(),
+        x_coords.ravel()**2, y_coords.ravel()**2,
+        x_coords.ravel() * y_coords.ravel()
+    ])
+    
+    form = (A_full @ coeffs).reshape(data.shape)
+```
+
+**Design Choice:** 2nd-order polynomial fit  
+**Alternative Approaches:**
+- **1st-order (planar) fit**: Simpler, removes only tilt and piston. Use for nearly flat samples.
+  - *When to use*: If you know the sample is intentionally flat (e.g., polished wafer) and only mounting tilt needs removal
+- **3rd or higher-order fit**: Captures more complex curvature. Use for intentionally curved samples.
+  - *When to use*: If the sample has known bowl-shaped deformation or complex macroscopic curvature
+- **Spline surface fit**: Very flexible, can model complex long-wavelength distortions
+  - *When to use*: For samples with systematic but non-polynomial distortion (e.g., thermal warping)
+
+**Sample Knowledge Influence:**  
+If you know the sample was mounted on a curved stage or has intentional macro-scale curvature from processing, you may want a higher polynomial order. For ceramic samples with only mounting tilt, 2nd-order is appropriate and prevents overfitting.
+
+##### Step 2: Waviness Extraction (Medium-Scale Features)
+
+**Code:**
+```python
+# 2. Remove form to get residual
+residual = data - form
+
+# 3. Waviness: Gaussian filter of residual
+# Cutoff wavelength for waviness: typically 0.8mm for surface analysis
+# Convert to pixels
+cutoff_wavelength_um = 800  # 0.8mm
+sigma_pixels = cutoff_wavelength_um / pixel_spacing_um / (2 * np.pi)
+
+# Apply Gaussian filter (handles NaN by replacing with mean temporarily)
+residual_filled = residual.copy()
+residual_filled[np.isnan(residual_filled)] = np.nanmean(residual_filled)
+waviness = gaussian_filter(residual_filled, sigma=sigma_pixels)
+```
+
+**Design Choice:** 0.8mm Gaussian filter cutoff  
+**Alternative Approaches:**
+- **ISO 4287/4288 standard filters**: Use standardized cutoffs (0.08mm, 0.25mm, 0.8mm, 2.5mm, 8mm)
+  - *When to use*: For comparing to published metrology standards or industry specs
+- **Smaller cutoff (e.g., 0.25mm)**: Moves more features into the "roughness" category
+  - *When to use*: If you know the relevant surface features are smaller (e.g., fine machining marks)
+- **Larger cutoff (e.g., 2.5mm)**: Moves more features into "waviness"
+  - *When to use*: If you're interested in larger-scale periodic patterns (e.g., wide laser scan lines)
+- **Band-pass filtering**: Extract a specific wavelength range rather than low-pass
+  - *When to use*: Isolating periodic structures with known spatial frequency
+- **Median filter instead of Gaussian**: More robust to outliers
+  - *When to use*: If your data has spikes or contamination that shouldn't influence waviness
+
+**Sample Knowledge Influence:**  
+For laser-etched ceramics with ~100µm line spacing, the 0.8mm cutoff is well above the feature size, so the periodic pattern appears in "waviness". If you're studying finer features (sub-100µm grain structure), consider 0.25mm. If the relevant manufacturing defects are at larger scales, use 2.5mm.
+
+##### Step 3: Roughness Calculation (Fine-Scale Texture)
+
+**Code:**
+```python
+# 4. Roughness: Residual after removing waviness
+roughness = residual - waviness
+```
+
+**Design Choice:** Simple subtraction (high-pass filtering)  
+**Alternative Approaches:**
+- **RMS-based normalization**: Scale roughness by local waviness amplitude
+  - *When to use*: If roughness magnitude varies systematically across the sample
+- **Detrended Fluctuation Analysis (DFA)**: Remove local trends at multiple scales
+  - *When to use*: For fractal or self-affine surfaces where scale-dependent analysis is needed
+- **Wavelet decomposition**: Multi-resolution analysis that separates scales more flexibly
+  - *When to use*: When you need to analyze roughness at multiple independent length scales simultaneously
+
+**Sample Knowledge Influence:**  
+If you know the ceramic processing creates roughness that scales with local geometry (e.g., rougher in valleys), consider normalized roughness. For most optical profilometry QC work, the simple residual is interpretable and standard.
+
+#### Summary of Key Decision Points
+
+1. **Polynomial order for form** → Depends on sample flatness and mounting
+2. **Waviness cutoff wavelength** → Should be larger than features of interest, smaller than sample size
+3. **Filter type (Gaussian vs. median vs. ISO)** → Gaussian is standard; median for noisy data; ISO for regulatory compliance
+4. **Roughness normalization** → Raw residual is typical; normalize if roughness varies spatially with known causes
 
 ### 3. **Downsampling**
 Optionally resolution for faster processing (2x, 4x, 8x, 16x, 32x).  Also optionally skip the visualizer rendering
@@ -53,6 +167,7 @@ usage: analyze_profilometry.py [-h] [-r {1,2,4,8,16,32}]
                                [-i {bilinear,laplacian,kriging}]
                                [--export-obj] [-o OUTPUT_DIR]
                                [--no-display] [--stats-only]
+                               [--bounds X1 X2 Y1 Y2]
                                input_file
 
 positional arguments:
@@ -69,6 +184,7 @@ optional arguments:
                         Directory to save output figures and statistics
   --no-display          Do not display plots interactively (only save)
   --stats-only          Only compute and print statistics, skip visualization
+  --bounds X1 X2 Y1 Y2  Crop image bounds in microns (x1 x2 y1 y2)
 ```
 
 ## Example Usage
@@ -88,6 +204,9 @@ py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz -r 4 --stats-on
 
 # Export roughness map as OBJ file for 3D visualization in Blender
 py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear --export-obj -o results/
+
+# Crop to a specific region (from 100 to 400 microns in x, 200 to 500 microns in y)
+py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz --bounds 100 400 200 500
 
 # Windows PowerShell Batch Processing
 Get-ChildItem heightmaps\*.xyz | ForEach-Object { py analyze_profilometry.py $_.FullName -r 4 -i bilinear -o results/ --no-display }
