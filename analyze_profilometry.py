@@ -40,52 +40,58 @@ def load_xyz_file(filepath, resolution_factor=1):
     
     start_time = time.time()
     
-    # Initialize 1024x1024 array with NaN
-    full_data = np.full((1024, 1024), np.nan)
-    
     # Read the file
+    header_lines = []
     with open(filepath, 'r') as f:
         # Read header (14 lines)
-        header_lines = []
         for i in range(14):
             header_lines.append(f.readline().strip())
-        
-        # Parse pixel spacing and scale factors from header line 8 (0-indexed line 7)
-        # Format: reserved lateral_sampling vertical_scale wavelength coherence reserved noise_floor timestamp
-        # Example: 0 0.5 5.78416e-07 0.08 1 0 5.88029e-06 1770655522
-        try:
-            parts = header_lines[7].split()
-            if len(parts) >= 8:
-                # Value 2: Lateral sampling (microns per pixel)
-                pixel_spacing_um = float(parts[1])
-                
-                # Value 3: Vertical scale factor (meters per z unit)
-                vertical_scale_m_per_unit = float(parts[2])
-                vertical_scale_um_per_unit = vertical_scale_m_per_unit * 1e6  # Convert to µm
-                
-                # Value 4: Wavelength/modulation parameter
-                wavelength = float(parts[3])
-                
-                # Value 5: Coherence flag
-                coherence_flag = int(parts[4])
-                
-                # Value 7: Noise floor estimate
-                noise_floor = float(parts[6])
-                
-                # Value 8: Unix timestamp
-                timestamp = int(parts[7])
-            else:
-                raise ValueError(f"Insufficient values in header line 8: {len(parts)} < 8")
-        except (ValueError, IndexError) as e:
-            print(f"Warning: Could not parse header line 8: {e}")
-            print(f"Using default values")
-            pixel_spacing_um = 0.586  # Default estimate
-            vertical_scale_um_per_unit = 1.0  # Assume already in microns
-            wavelength = None
-            coherence_flag = None
-            noise_floor = None
-            timestamp = None
-        
+    
+    # Parse array dimensions from header line 4 (index 3)
+    # Format: reserved reserved width height
+    try:
+        dim_parts = header_lines[3].split()
+        width = int(dim_parts[2])
+        height = int(dim_parts[3])
+    except (IndexError, ValueError):
+        print("Warning: Could not parse dimensions from header line 4. Defaulting to 1024x1024.")
+        width, height = 1024, 1024
+
+    # Initialize array with dynamic dimensions
+    full_data = np.full((height, width), np.nan)
+    
+    # Parse pixel spacing from header line 8 (0-indexed line 7)
+    # 7th element is m/pixel
+    try:
+        parts = header_lines[7].split()
+        if len(parts) >= 8:
+            # Value 7: True lateral sampling (um per pixel)
+            pixel_spacing_um = float(parts[6])*(10**6)
+            
+            # Value 4: Wavelength/modulation parameter
+            wavelength = float(parts[3])
+            
+            # Value 5: Coherence flag
+            coherence_flag = int(parts[4])
+            
+            # Value 8: Unix timestamp
+            timestamp = int(parts[7])
+        else:
+            raise ValueError(f"Insufficient values in header line 8: {len(parts)} < 8")
+    except (ValueError, IndexError) as e:
+        print(f"Warning: Could not parse header line 8: {e}")
+        print(f"Using default values")
+        pixel_spacing_um = 0.5  # Default estimate from line 8 index 1
+        wavelength = None
+        coherence_flag = None
+        timestamp = None
+    
+    # Read the data (re-opening file to read after header)
+    with open(filepath, 'r') as f:
+        # Skip header
+        for _ in range(14):
+            f.readline()
+            
         # Parse data lines
         for line in f:
             line = line.strip()
@@ -105,21 +111,22 @@ def load_xyz_file(filepath, resolution_factor=1):
                 continue
             else:
                 try:
-                    z_raw = float(parts[2])
-                    # Apply vertical scale factor to convert to microns
-                    z_microns = z_raw * vertical_scale_um_per_unit
-                    full_data[y, x] = z_microns
+                    # User specified: z column values are already in microns
+                    z_microns = float(parts[2])
+                    if 0 <= y < height and 0 <= x < width:
+                        full_data[y, x] = z_microns
                 except (ValueError, IndexError):
                     continue
     
     # Downsample if requested
     if resolution_factor > 1:
         # Use mean pooling for downsampling (ignoring NaN values)
-        new_size = 1024 // resolution_factor
-        data = np.full((new_size, new_size), np.nan)
+        new_height = height // resolution_factor
+        new_width = width // resolution_factor
+        data = np.full((new_height, new_width), np.nan)
         
-        for i in range(new_size):
-            for j in range(new_size):
+        for i in range(new_height):
+            for j in range(new_width):
                 block = full_data[
                     i*resolution_factor:(i+1)*resolution_factor,
                     j*resolution_factor:(j+1)*resolution_factor
@@ -135,28 +142,24 @@ def load_xyz_file(filepath, resolution_factor=1):
     
     load_time = time.time() - start_time
     print(f"Data loaded in {load_time:.2f} seconds")
-    print(f"Pixel spacing: {pixel_spacing_um:.3f} µm/pixel")
-    print(f"Vertical scale: {vertical_scale_um_per_unit:.6f} µm/unit")
+    print(f"Pixel spacing: {pixel_spacing_um:.6f} µm/pixel")
+    print(f"Array size: {width}x{height}")
     if wavelength is not None:
         print(f"Wavelength parameter: {wavelength}")
     if coherence_flag is not None:
         print(f"Coherence flag: {coherence_flag}")
-    if noise_floor is not None:
-        print(f"Noise floor: {noise_floor:.6e}")
     
     # Extract metadata
     metadata = {
         'header': header_lines,
         'filepath': str(filepath),
         'resolution_factor': resolution_factor,
-        'original_size': (1024, 1024),
+        'original_size': (width, height),
         'processed_size': data.shape,
         'load_time': load_time,
         'pixel_spacing_um': pixel_spacing_um,
-        'vertical_scale_um_per_unit': vertical_scale_um_per_unit,
         'wavelength': wavelength,
         'coherence_flag': coherence_flag,
-        'noise_floor': noise_floor,
         'timestamp': timestamp
     }
     
@@ -779,13 +782,12 @@ Examples:
             f.write(f"HEADER METADATA\n")
             f.write(f"{'='*60}\n\n")
             f.write(f"Lateral Sampling: {metadata['pixel_spacing_um']:.3f} µm/pixel\n")
-            f.write(f"Vertical Scale: {metadata['vertical_scale_um_per_unit']:.6f} µm/unit\n")
+            f.write(f"Lateral Sampling: {metadata['pixel_spacing_um']:.6f} µm/pixel\n")
+            f.write(f"Original Dimensions: {metadata['original_size'][0]}x{metadata['original_size'][1]}\n")
             if metadata['wavelength'] is not None:
                 f.write(f"Wavelength Parameter: {metadata['wavelength']}\n")
             if metadata['coherence_flag'] is not None:
                 f.write(f"Coherence Flag: {metadata['coherence_flag']}\n")
-            if metadata['noise_floor'] is not None:
-                f.write(f"Noise Floor Estimate: {metadata['noise_floor']:.6e}\n")
             if metadata['timestamp'] is not None:
                 from datetime import datetime
                 dt = datetime.fromtimestamp(metadata['timestamp'])
@@ -794,6 +796,7 @@ Examples:
             f.write(f"STATISTICAL ANALYSIS\n")
             f.write(f"{'='*60}\n\n")
             
+            f.write(f"Processed Size: {metadata['processed_size']}\n")
             f.write(f"Data Coverage:\n")
             f.write(f"  Total points:   {stats['total_points']:,}\n")
             f.write(f"  Valid points:   {stats['valid_points']:,}\n")

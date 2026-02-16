@@ -74,41 +74,23 @@ optional arguments:
 ## Example Usage
 
 ```bash
-# Quick analysis with 4x downsampling (recommended)
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4
+# Full resolution analysis, default to bilinear inerpolation
+py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz
 
-# Full resolution analysis
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz
-
-# Bilinear interpolation (fast, good for most cases)
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear
-
-# Laplacian interpolation (best for edge/corner handling)
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i laplacian
-
-# Kriging interpolation (slowest, smoothest results)
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i kriging
-
-# 4x downsampling (256×256) - recommended for quick analysis
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4
-
-# 8x downsampling (128×128) - very fast
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 8
-
-# 16x downsampling (64×64) - extremely fast
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 16
+# Kriging interpolation, 4x downsampling
+py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz -r 4 -i kriging
 
 # Save visualizations and statistics to 'results' folder
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear -o results/
+py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear -o results/
 
 # Just compute and print statistics
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 --stats-only
+py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz -r 4 --stats-only
 
 # Export roughness map as OBJ file for 3D visualization in Blender
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear --export-obj -o results/
+py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear --export-obj -o results/
 
 # Windows PowerShell Batch Processing
-Get-ChildItem ceramics\*.xyz | ForEach-Object { py analyze_profilometry.py $_.FullName -r 4 -i bilinear -o results/ --no-display }
+Get-ChildItem heightmaps\*.xyz | ForEach-Object { py analyze_profilometry.py $_.FullName -r 4 -i bilinear -o results/ --no-display }
 ```
 ## Data Format
 
@@ -244,15 +226,6 @@ py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_003.xyz -r 4 --stats-only
 
 If I'm interpreting the header info correctly (it's unlabeled, so maybe not), the instrument has a noise floor of a few microns, which sets the limit on measurable surface features.  Ra/Rq values should be compared to noise floor for if this is true.
 
-## MSC's Profilometer Description
-
-> ### Zygo Nexview 3D Optical Surface Profiler:
-> White Light Interferometry.
-> 2.5x, 10x, 20x, 50x objectives with 0.5x, 1x, 2x internal magnification.
-> Automated image stitching.
-> 200mm XY stage and 100mm Z clearance with capacity for up to 10lbs.
-> A white light interferometer is a type of profilometer in which light from a lamp is split into two paths by a beam splitter. One path directs the light onto the surface under test, the other path directs the light to a reference mirror. Reflections from the two surfaces are recombined and projected onto an array detector. When the path difference between the recombined beams is on the order of a few wavelengths of light or less, interference can occur. This interference contains information about the surface contours of the test surface. Vertical resolution can be on the order of several angstroms while lateral resolution depends upon the system and objective and is typically in the range of 0.26um – 4.4um.
-
 ## To-do
 - re-evaluate the xy pixel intervals — the images seem way too big for the units (~50 um lines are like 5 um)
 - subtract DC before form?  Should I consider the first big jump in the heights histogram to be the DC offset?
@@ -281,3 +254,16 @@ If I'm interpreting the header info correctly (it's unlabeled, so maybe not), th
 - Autocorrelation / structure function (correlation lengths and isotropy)
 - Wavelets / multiresolution decomposition
 - Directional / oriented analysis
+
+## Resources
+
+- https://en.wikipedia.org/wiki/White_light_interferometry
+
+### MSC's Profilometer Description
+
+> #### Zygo Nexview 3D Optical Surface Profiler:
+> White Light Interferometry.
+> 2.5x, 10x, 20x, 50x objectives with 0.5x, 1x, 2x internal magnification.
+> Automated image stitching.
+> 200mm XY stage and 100mm Z clearance with capacity for up to 10lbs.
+> A white light interferometer is a type of profilometer in which light from a lamp is split into two paths by a beam splitter. One path directs the light onto the surface under test, the other path directs the light to a reference mirror. Reflections from the two surfaces are recombined and projected onto an array detector. When the path difference between the recombined beams is on the order of a few wavelengths of light or less, interference can occur. This interference contains information about the surface contours of the test surface. Vertical resolution can be on the order of several angstroms while lateral resolution depends upon the system and objective and is typically in the range of 0.26um – 4.4um.
