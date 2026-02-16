@@ -129,6 +129,8 @@ The XYZ files have the following structure:
 
 ![alt text](exports/interpolation-methods/comparison_gaussian_scratch.png)
 
+---
+
 ## poisson random
 
 ![alt text](exports/interpolation-methods/comparison_poisson_random.png)
@@ -137,13 +139,15 @@ The XYZ files have the following structure:
 
 ![alt text](exports/interpolation-methods/comparison_poisson_scratch.png)
 
-## kriging random
+---
 
-![alt text](exports/interpolation-methods/comparison_kriging_random.png)
+## speckle random
 
-## kriging scratch
+![alt text](exports/interpolation-methods/comparison_speckle_random.png)
 
-![alt text](exports/interpolation-methods/comparison_kriging_scratch.png)
+## speckle scratch
+
+![alt text](exports/interpolation-methods/comparison_speckle_scratch.png)
 
 ---
 
