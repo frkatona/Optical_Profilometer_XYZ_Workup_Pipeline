@@ -7,7 +7,7 @@ This directory contains a python pipeline for analyzing and visualizing optical 
 ## Example exports: 
 
 ### Cross-hatch surface
-![crosshatch](exports/crosshatch_1.png)
+![crosshatch](exports/profilometery_workup_v1/crosshatch_1.png)
 
 ---
 
@@ -100,26 +100,13 @@ The XYZ files have the following structure:
   - X, Y: Integer coordinates (0-1023)
     - it is not clear as of this commit (2/10/26) how to translate this into physical distance.  The values that result from the header scalar do not match intuition (the line spacing should be ~100 microns)
   - Z: Height value
-    - it is not yet totally clear as of this commit (2/10/26) if these values are in um or if the header contains the scalar from meters which would differe by a factor of ~5)
+    - it is not yet totally clear as of this commit (2/10/26) if these values are in um or if the header contains the scalar from meters which would differe by a factor of ~5
 
 ## Interpolation Methods for NaN Points
 
-### Bilinear (recommended)
-- Fast linear interpolation using scipy's griddata
-- Falls back to nearest neighbor for edge/corner points
-- **Best for**: General use, quick analysis
-
-### Laplacian
-- Iteratively solves Laplace equation
-- Natural handling of boundaries and edges
-- Converges to smooth solution
-- **Best for**: Data with many edge/corner NaN values
-
-### Kriging (RBF-based)
-- Uses thin-plate spline radial basis functions
-- Produces very smooth interpolations
-- Computationally expensive
-- **Best for**: High-quality visualization with smooth surfaces
+- Bilinear
+- Laplacian
+- Kriging
 
 ## Downsampling and other performance flags
 
@@ -130,23 +117,33 @@ The XYZ files have the following structure:
 - Bilinear interpolation is fastest; kriging is slowest but smoothest
 - Pixel spacing is automatically extracted from file header
 
-## Examples
+---
 
-```bash
-# Quick exploration with interpolation
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear
+# interpolation methods exploration
 
-# High-quality analysis with all features
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 2 -i laplacian -o results/
+## gaussian random
 
-# Export roughness for Blender visualization
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear --export-obj -o results/
+![alt text](exports/interpolation-methods/comparison_gaussian_random.png)
 
-# Compare multiple samples (statistics only)
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_001.xyz -r 4 --stats-only
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_002.xyz -r 4 --stats-only
-py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_003.xyz -r 4 --stats-only
-```
+## gaussian scratch
+
+![alt text](exports/interpolation-methods/comparison_gaussian_scratch.png)
+
+## poisson random
+
+![alt text](exports/interpolation-methods/comparison_poisson_random.png)
+
+## poisson scratch
+
+![alt text](exports/interpolation-methods/comparison_poisson_scratch.png)
+
+## kriging random
+
+![alt text](exports/interpolation-methods/comparison_kriging_random.png)
+
+## kriging scratch
+
+![alt text](exports/interpolation-methods/comparison_kriging_scratch.png)
 
 ---
 
@@ -166,57 +163,57 @@ py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_003.xyz -r 4 --stats-only
 
 ## Standard - 100 um scan interval (1)
 
-![alt text](exports/standard_1.png)
+![alt text](exports/profilometery_workup_v1/standard_1.png)
 
 ## Standard - 100 um scan interval (2)
 
-![alt text](exports/standard_2.png)
+![alt text](exports/profilometery_workup_v1/standard_2.png)
 
 ## Standard - 100 um scan interval (3)
 
-![alt text](exports/standard_3.png)
+![alt text](exports/profilometery_workup_v1/standard_3.png)
 
 ---
 
 ## ? (1)
 
-![alt text](exports/PCD_01mm_2.75x_05x_001.png)
+![alt text](exports/profilometery_workup_v1/PCD_01mm_2.75x_05x_001.png)
 
 ## ? (2)
 
-![alt text](exports/PCD_01mm_2.75x_05x_002.png)
+![alt text](exports/profilometery_workup_v1/PCD_01mm_2.75x_05x_002.png)
 
 ## ? (3)
 
-![alt text](exports/PCD_01mm_2.75x_05x_003.png)
+![alt text](exports/profilometery_workup_v1/PCD_01mm_2.75x_05x_003.png)
 
 ---
 
 ## Cross-hatch (1)
 
-![alt text](exports/crosshatch_1.png)
+![alt text](exports/profilometery_workup_v1/crosshatch_1.png)
 
 ## Cross-hatch (2)
 
-![alt text](exports/crosshatch_2.png)
+![alt text](exports/profilometery_workup_v1/crosshatch_2.png)
 
 ## Cross-hatch (3)
 
-![alt text](exports/crosshatch_3.png)
+![alt text](exports/profilometery_workup_v1/crosshatch_3.png)
 
 ---
 
 ## 2x line density (1)
 
-![2x line density (1)](exports/2x-line-density_1.png)
+![2x line density (1)](exports/profilometery_workup_v1/2x-line-density_1.png)
 
 ## 2x line density (2)
 
-![2x line density (2)](exports/2x-line-density_2.png)
+![2x line density (2)](exports/profilometery_workup_v1/2x-line-density_2.png)
 
 ## 2x line density (3)
 
-![2x line density (3)](exports/2x-line-density_3.png)
+![2x line density (3)](exports/profilometery_workup_v1/2x-line-density_3.png)
 
 ---
 
@@ -227,6 +224,7 @@ py analyze_profilometry.py ceramics/PCD_01mm_2.75x_05x_003.xyz -r 4 --stats-only
 If I'm interpreting the header info correctly (it's unlabeled, so maybe not), the instrument has a noise floor of a few microns, which sets the limit on measurable surface features.  Ra/Rq values should be compared to noise floor for if this is true.
 
 ## To-do
+- show the data coverage before (maybe also after like this) to better tell whether the interpolation mode was appropriate (Kriging sometimes useful for big gaps in an effort to preserve PSD)
 - re-evaluate the xy pixel intervals — the images seem way too big for the units (~50 um lines are like 5 um)
 - subtract DC before form?  Should I consider the first big jump in the heights histogram to be the DC offset?
 - additional figures
@@ -257,7 +255,12 @@ If I'm interpreting the header info correctly (it's unlabeled, so maybe not), th
 
 ## Resources
 
+instrument
 - https://en.wikipedia.org/wiki/White_light_interferometry
+
+interpolation
+- https://en.wikipedia.org/wiki/Radial_basis_function_interpolation
+- https://en.wikipedia.org/wiki/Kriging
 
 ### MSC's Profilometer Description
 
