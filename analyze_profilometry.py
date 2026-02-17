@@ -14,7 +14,8 @@ import time
 from pathlib import Path
 from scipy import ndimage
 from scipy.interpolate import griddata, RBFInterpolator
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, generic_filter, laplace
+from scipy.signal import correlate2d
 
 
 def load_xyz_file(filepath, resolution_factor=1):
@@ -520,7 +521,7 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     Parameters:
     -----------
     data : np.ndarray
-        2D array of height values
+        2D array of height values (possibly interpolated)
     metadata : dict
         File metadata
     stats : dict
@@ -530,7 +531,7 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     original_data : np.ndarray, optional
         Original data before interpolation (for coverage map)
     """
-    print("Creating visualizations...")
+    print("Creating enhanced visualizations...")
     
     if output_dir:
         output_dir = Path(output_dir)
@@ -546,51 +547,51 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     # Decompose surface into form, waviness, and roughness
     form, waviness, roughness = decompose_surface(data, pixel_spacing_um)
     
-    # Create figure with 3x3 subplots
-    fig = plt.figure(figsize=(20, 18))
+    # Compute pre-interpolation coverage percentage
+    data_for_coverage = original_data if original_data is not None else data
+    coverage_before_interp = np.sum(~np.isnan(data_for_coverage)) / data_for_coverage.size * 100
     
-    # Row 1: Original data analysis
+    # Create figure with 4x5 subplots (20 total)
+    fig = plt.figure(figsize=(25, 20))
+    
+    # ========== Row 1: Basic Maps ==========
     # 1. 2D Height Map
-    ax1 = plt.subplot(3, 3, 1)
+    ax1 = plt.subplot(4, 5, 1)
     im1 = ax1.imshow(data, cmap='viridis', origin='lower', interpolation='nearest',
                      extent=extent_um)
-    ax1.set_title('2D Height Map', fontsize=14, fontweight='bold')
-    ax1.set_xlabel('X Position (µm)')
-    ax1.set_ylabel('Y Position (µm)')
-    cbar1 = plt.colorbar(im1, ax=ax1, label='Height (µm)')
+    ax1.set_title('2D Height Map', fontsize=12, fontweight='bold')
+    ax1.set_xlabel('X (µm)', fontsize=10)
+    ax1.set_ylabel('Y (µm)', fontsize=10)
+    plt.colorbar(im1, ax=ax1, label='Height (µm)')
     
-    # 2. Roughness Distribution (changed from height distribution)
-    ax2 = plt.subplot(3, 3, 2)
+    # 2. Dual Histograms (Height + Roughness)
+    ax2 = plt.subplot(4, 5, 2)
+    valid_data = data[~np.isnan(data)]
     valid_roughness = roughness[~np.isnan(roughness)]
-    ax2.hist(valid_roughness, bins=100, color='steelblue', alpha=0.7, edgecolor='black')
-    ax2.axvline(np.nanmean(roughness), color='red', linestyle='--', linewidth=2, 
-                label=f"Mean: {np.nanmean(roughness):.2f} µm")
-    ax2.axvline(np.nanmedian(roughness), color='green', linestyle='--', linewidth=2, 
-                label=f"Median: {np.nanmedian(roughness):.2f} µm")
-    ax2.set_title('Roughness Distribution', fontsize=14, fontweight='bold')
-    ax2.set_xlabel('Roughness (µm)')
-    ax2.set_ylabel('Frequency')
-    ax2.legend()
+    ax2.hist(valid_data, bins=80, color='green', alpha=0.5, label='Height', edgecolor='darkgreen')
+    ax2_twin = ax2.twiny()
+    ax2_twin.hist(valid_roughness, bins=80, color='blue', alpha=0.5, label='Roughness', edgecolor='darkblue')
+    ax2.set_title('Dual Histogram: Height + Roughness', fontsize=12, fontweight='bold')
+    ax2.set_xlabel('Height (µm)', fontsize=10, color='green')
+    ax2_twin.set_xlabel('Roughness (µm)', fontsize=10, color='blue')
+    ax2.set_ylabel('Frequency', fontsize=10)
+    ax2.tick_params(axis='x', labelcolor='green')
+    ax2_twin.tick_params(axis='x', labelcolor='blue')
     ax2.grid(True, alpha=0.3)
     
     # 3. Data Coverage Map (before interpolation)
-    ax3 = plt.subplot(3, 3, 3)
-    # Use original data before interpolation for coverage map
-    data_for_coverage = original_data if original_data is not None else data
+    ax3 = plt.subplot(4, 5, 3)
     coverage_map = ~np.isnan(data_for_coverage)
     im3 = ax3.imshow(coverage_map, cmap='RdYlGn', origin='lower', interpolation='nearest',
                      extent=extent_um)
-    ax3.set_title(f'Data Coverage (Before Interpolation) ({stats["coverage_percent"]:.1f}%)', 
-                  fontsize=14, fontweight='bold')
-    ax3.set_xlabel('X Position (µm)')
-    ax3.set_ylabel('Y Position (µm)')
-    plt.colorbar(im3, ax=ax3, label='Valid Data', ticks=[0, 1])
+    ax3.set_title(f'Data Coverage (Before Interp: {coverage_before_interp:.1f}%)', 
+                  fontsize=12, fontweight='bold')
+    ax3.set_xlabel('X (µm)', fontsize=10)
+    ax3.set_ylabel('Y (µm)', fontsize=10)
+    plt.colorbar(im3, ax=ax3, label='Valid', ticks=[0, 1])
     
-    # Row 2: 3D and profiles
     # 4. 3D Surface Plot - Original Height Map
-    ax4 = plt.subplot(3, 3, 4, projection='3d')
-    
-    # Downsample for 3D plot if data is large
+    ax4 = plt.subplot(4, 5, 4, projection='3d')
     plot_factor = max(1, data.shape[0] // 200)
     if plot_factor > 1:
         plot_data = data[::plot_factor, ::plot_factor]
@@ -603,91 +604,289 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     y_um = np.arange(plot_data.shape[0]) * plot_spacing
     X, Y = np.meshgrid(x_um, y_um)
     
-    # Create surface plot of original height data
     surf = ax4.plot_surface(X, Y, plot_data, cmap='viridis', 
                            linewidth=0, antialiased=True, alpha=0.9)
-    ax4.set_title('3D Height Map', fontsize=14, fontweight='bold')
-    ax4.set_xlabel('X Position (µm)')
-    ax4.set_ylabel('Y Position (µm)')
-    ax4.set_zlabel('Height (µm)')
-    ax4.view_init(elev=30, azim=45)  # 45 degree azimuth angle
+    ax4.set_title('3D Height Map', fontsize=12, fontweight='bold')
+    ax4.set_xlabel('X (µm)', fontsize=9)
+    ax4.set_ylabel('Y (µm)', fontsize=9)
+    ax4.set_zlabel('Z (µm)', fontsize=9)
+    ax4.view_init(elev=30, azim=45)
     
-    # 5. Cross-section profiles - ROUGHNESS
-    ax5 = plt.subplot(3, 3, 5)
+    # 5. Roughness Map
+    ax5 = plt.subplot(4, 5, 5)
+    im5 = ax5.imshow(roughness, cmap='RdBu_r', origin='lower', interpolation='nearest',
+                     extent=extent_um, vmin=-np.nanstd(roughness)*3, vmax=np.nanstd(roughness)*3)
+    ax5.set_title('Roughness (Fine-Scale)', fontsize=12, fontweight='bold')
+    ax5.set_xlabel('X (µm)', fontsize=10)
+    ax5.set_ylabel('Y (µm)', fontsize=10)
+    plt.colorbar(im5, ax=ax5, label='Roughness (µm)')
     
-    # Horizontal cross-section at middle
-    mid_y = roughness.shape[0] // 2
-    h_profile = roughness[mid_y, :]
-    x_positions_um = np.arange(len(h_profile)) * pixel_spacing_um
-    ax5.plot(x_positions_um, h_profile, label=f'Horizontal (Y={mid_y*pixel_spacing_um:.0f} µm)', 
-             linewidth=2, alpha=0.7)
+    # ========== Row 2: Cross-Sections and Profiles ==========
+    # 6. Dual Cross-Section Profiles (Height + Roughness)
+    ax6 = plt.subplot(4, 5, 6)
+    mid_y = data.shape[0] // 2
+    h_profile_height = data[mid_y, :]
+    h_profile_roughness = roughness[mid_y, :]
+    x_positions_um = np.arange(len(h_profile_height)) * pixel_spacing_um
     
-    # Vertical cross-section at middle
-    mid_x = roughness.shape[1] // 2
-    v_profile = roughness[:, mid_x]
-    y_positions_um = np.arange(len(v_profile)) * pixel_spacing_um
-    ax5.plot(y_positions_um, v_profile, label=f'Vertical (X={mid_x*pixel_spacing_um:.0f} µm)', 
-             linewidth=2, alpha=0.7)
+    ax6.plot(x_positions_um, h_profile_height, label='Height', linewidth=2, alpha=0.7, color='green')
+    ax6_twin = ax6.twinx()
+    ax6_twin.plot(x_positions_um, h_profile_roughness, label='Roughness', linewidth=2, alpha=0.7, color='blue')
     
-    ax5.set_title('Roughness Cross-Section Profiles', fontsize=14, fontweight='bold')
-    ax5.set_xlabel('Position (µm)')
-    ax5.set_ylabel('Roughness (µm)')
-    ax5.legend()
-    ax5.grid(True, alpha=0.3)
+    ax6.set_title(f'Horizontal Profile (Y={mid_y*pixel_spacing_um:.0f} µm)', fontsize=12, fontweight='bold')
+    ax6.set_xlabel('X Position (µm)', fontsize=10)
+    ax6.set_ylabel('Height (µm)', fontsize=10, color='green')
+    ax6_twin.set_ylabel('Roughness (µm)', fontsize=10, color='blue')
+    ax6.tick_params(axis='y', labelcolor='green')
+    ax6_twin.tick_params(axis='y', labelcolor='blue')
+    ax6.grid(True, alpha=0.3)
     
-    # 6. Gradient/Slope Map
-    ax6 = plt.subplot(3, 3, 6)
+    # 7. Vertical Dual Cross-Section
+    ax7 = plt.subplot(4, 5, 7)
+    mid_x = data.shape[1] // 2
+    v_profile_height = data[:, mid_x]
+    v_profile_roughness = roughness[:, mid_x]
+    y_positions_um = np.arange(len(v_profile_height)) * pixel_spacing_um
     
-    # Compute gradient magnitude (accounting for pixel spacing)
+    ax7.plot(y_positions_um, v_profile_height, label='Height', linewidth=2, alpha=0.7, color='green')
+    ax7_twin = ax7.twinx()
+    ax7_twin.plot(y_positions_um, v_profile_roughness, label='Roughness', linewidth=2, alpha=0.7, color='blue')
+    
+    ax7.set_title(f'Vertical Profile (X={mid_x*pixel_spacing_um:.0f} µm)', fontsize=12, fontweight='bold')
+    ax7.set_xlabel('Y Position (µm)', fontsize=10)
+    ax7.set_ylabel('Height (µm)', fontsize=10, color='green')
+    ax7_twin.set_ylabel('Roughness (µm)', fontsize=10, color='blue')
+    ax7.tick_params(axis='y', labelcolor='green')
+    ax7_twin.tick_params(axis='y', labelcolor='blue')
+    ax7.grid(True, alpha=0.3)
+    
+    # 8. Power Spectral Density (PSD)
+    ax8 = plt.subplot(4, 5, 8)
+    # Compute 2D FFT
+    data_filled = np.nan_to_num(data, nan=np.nanmean(data))
+    fft2 = np.fft.fft2(data_filled)
+    psd2 = np.abs(fft2)**2
+    
+    # Compute radially averaged PSD
+    cy, cx = data.shape[0] // 2, data.shape[1] // 2
+    y_idx, x_idx = np.ogrid[:data.shape[0], :data.shape[1]]
+    r = np.sqrt((x_idx - cx)**2 + (y_idx - cy)**2).astype(int)
+    
+    r_max = min(cy, cx)
+    psd_radial = np.zeros(r_max)
+    for i in range(r_max):
+        mask = (r == i)
+        if np.sum(mask) > 0:
+            psd_radial[i] = np.mean(psd2[mask])
+    
+    # Convert to spatial frequency (cycles/µm)
+    freq_um = np.fft.fftfreq(2*r_max, pixel_spacing_um)[:r_max]
+    
+    ax8.loglog(freq_um[1:], psd_radial[1:], linewidth=2, color='purple')
+    ax8.set_title('Power Spectral Density', fontsize=12, fontweight='bold')
+    ax8.set_xlabel('Spatial Frequency (cycles/µm)', fontsize=10)
+    ax8.set_ylabel('PSD (µm⁴)', fontsize=10)
+    ax8.grid(True, alpha=0.3, which='both')
+    
+    # 9. Autocorrelation Function
+    ax9 = plt.subplot(4, 5, 9)
+    from scipy.signal import correlate2d
+    data_centered = data_filled - np.nanmean(data_filled)
+    autocorr = correlate2d(data_centered, data_centered, mode='same')
+    autocorr /= autocorr[cy, cx]  # Normalize
+    
+    # Plot central slice
+    autocorr_slice = autocorr[cy, cx:]
+    lag_um = np.arange(len(autocorr_slice)) * pixel_spacing_um
+    
+    ax9.plot(lag_um, autocorr_slice, linewidth=2, color='darkgreen')
+    ax9.axhline(0, color='black', linestyle='--', alpha=0.5)
+    ax9.axhline(np.exp(-1), color='red', linestyle=':', alpha=0.5, label='e⁻¹')
+    ax9.set_title('Autocorrelation Function', fontsize=12, fontweight='bold')
+    ax9.set_xlabel('Lag (µm)', fontsize=10)
+    ax9.set_ylabel('Autocorrelation', fontsize=10)
+    ax9.legend(fontsize=9)
+    ax9.grid(True, alpha=0.3)
+    ax9.set_ylim(-0.5, 1.1)
+    
+    # 10. Abbott-Firestone Curve (Bearing Ratio)
+    ax10 = plt.subplot(4, 5, 10)
+    sorted_heights = np.sort(valid_data)[::-1]  # Descending
+    bearing_ratio = np.arange(len(sorted_heights)) / len(sorted_heights) * 100
+    
+    ax10.plot(bearing_ratio, sorted_heights, linewidth=2, color='brown')
+    ax10.set_title('Abbott-Firestone Curve', fontsize=12, fontweight='bold')
+    ax10.set_xlabel('Material Ratio (%)', fontsize=10)
+    ax10.set_ylabel('Height (µm)', fontsize=10)
+    ax10.grid(True, alpha=0.3)
+    ax10.axhline(np.nanmean(data), color='red', linestyle='--', label='Mean', alpha=0.7)
+    ax10.legend(fontsize=9)
+    
+    # ========== Row 3: Decomposition Components ==========
+    # 11. Form (large-scale shape)
+    ax11 = plt.subplot(4, 5, 11)
+    im11 = ax11.imshow(form, cmap='coolwarm', origin='lower', interpolation='nearest',
+                       extent=extent_um)
+    ax11.set_title('Form (Large-Scale)', fontsize=12, fontweight='bold')
+    ax11.set_xlabel('X (µm)', fontsize=10)
+    ax11.set_ylabel('Y (µm)', fontsize=10)
+    plt.colorbar(im11, ax=ax11, label='Height (µm)')
+    
+    # 12. Waviness (medium-scale)
+    ax12 = plt.subplot(4, 5, 12)
+    im12 = ax12.imshow(waviness, cmap='seismic', origin='lower', interpolation='nearest',
+                       extent=extent_um, vmin=-np.nanstd(waviness)*3, vmax=np.nanstd(waviness)*3)
+    ax12.set_title('Waviness (Medium-Scale)', fontsize=12, fontweight='bold')
+    ax12.set_xlabel('X (µm)', fontsize=10)
+    ax12.set_ylabel('Y (µm)', fontsize=10)
+    plt.colorbar(im12, ax=ax12, label='Height (µm)')
+    
+    # 13. Gradient/Slope Map
+    ax13 = plt.subplot(4, 5, 13)
     gy, gx = np.gradient(np.nan_to_num(data, nan=0))
-    # Convert to slope (dimensionless)
     gradient_mag = np.sqrt(gx**2 + gy**2) / pixel_spacing_um
     gradient_mag[np.isnan(data)] = np.nan
     
-    im6 = ax6.imshow(gradient_mag, cmap='hot', origin='lower', interpolation='nearest',
-                     extent=extent_um)
-    ax6.set_title('Surface Gradient Magnitude', fontsize=14, fontweight='bold')
-    ax6.set_xlabel('X Position (µm)')
-    ax6.set_ylabel('Y Position (µm)')
-    plt.colorbar(im6, ax=ax6, label='Gradient (µm/µm)')
+    im13 = ax13.imshow(gradient_mag, cmap='hot', origin='lower', interpolation='nearest',
+                       extent=extent_um)
+    ax13.set_title('Surface Gradient', fontsize=12, fontweight='bold')
+    ax13.set_xlabel('X (µm)', fontsize=10)
+    ax13.set_ylabel('Y (µm)', fontsize=10)
+    plt.colorbar(im13, ax=ax13, label='|∇z| (µm/µm)')
     
-    # Row 3: Form, Waviness, Roughness decomposition
-    # 7. Form (large-scale shape)
-    ax7 = plt.subplot(3, 3, 7)
-    im7 = ax7.imshow(form, cmap='coolwarm', origin='lower', interpolation='nearest',
-                     extent=extent_um)
-    ax7.set_title('Form (Large-Scale Shape)', fontsize=14, fontweight='bold')
-    ax7.set_xlabel('X Position (µm)')
-    ax7.set_ylabel('Y Position (µm)')
-    plt.colorbar(im7, ax=ax7, label='Height (µm)')
+    # 14. Slope Distribution Histogram
+    ax14 = plt.subplot(4, 5, 14)
+    valid_gradients = gradient_mag[~np.isnan(gradient_mag)]
+    ax14.hist(valid_gradients, bins=80, color='orangered', alpha=0.7, edgecolor='darkred')
+    ax14.axvline(np.mean(valid_gradients), color='black', linestyle='--', linewidth=2,
+                 label=f'Mean: {np.mean(valid_gradients):.3f}')
+    ax14.set_title('Slope Distribution', fontsize=12, fontweight='bold')
+    ax14.set_xlabel('Gradient (µm/µm)', fontsize=10)
+    ax14.set_ylabel('Frequency', fontsize=10)
+    ax14.legend(fontsize=9)
+    ax14.grid(True, alpha=0.3)
     
-    # 8. Waviness (medium-scale)
-    ax8 = plt.subplot(3, 3, 8)
-    im8 = ax8.imshow(waviness, cmap='seismic', origin='lower', interpolation='nearest',
-                     extent=extent_um, vmin=-np.nanstd(waviness)*3, vmax=np.nanstd(waviness)*3)
-    ax8.set_title('Waviness (Medium-Scale)', fontsize=14, fontweight='bold')
-    ax8.set_xlabel('X Position (µm)')
-    ax8.set_ylabel('Y Position (µm)')
-    plt.colorbar(im8, ax=ax8, label='Height (µm)')
+    # 15. Local Roughness Map (RMS in sliding window)
+    ax15 = plt.subplot(4, 5, 15)
+    from scipy.ndimage import generic_filter
     
-    # 9. Roughness (fine-scale)
-    ax9 = plt.subplot(3, 3, 9)
-    im9 = ax9.imshow(roughness, cmap='RdBu_r', origin='lower', interpolation='nearest',
-                     extent=extent_um, vmin=-np.nanstd(roughness)*3, vmax=np.nanstd(roughness)*3)
-    ax9.set_title('Roughness (Fine-Scale)', fontsize=14, fontweight='bold')
-    ax9.set_xlabel('X Position (µm)')
-    ax9.set_ylabel('Y Position (µm)')
-    plt.colorbar(im9, ax=ax9, label='Height (µm)')
+    def local_rms(values):
+        return np.sqrt(np.nanmean(values**2))
+    
+    # Use smaller window for local analysis
+    window_size = max(5, data.shape[0] // 32)
+    local_roughness = generic_filter(roughness, local_rms, size=window_size, mode='constant', cval=np.nan)
+    
+    im15 = ax15.imshow(local_roughness, cmap='plasma', origin='lower', interpolation='nearest',
+                       extent=extent_um)
+    ax15.set_title(f'Local RMS Roughness ({window_size}px window)', fontsize=12, fontweight='bold')
+    ax15.set_xlabel('X (µm)', fontsize=10)
+    ax15.set_ylabel('Y (µm)', fontsize=10)
+    plt.colorbar(im15, ax=ax15, label='Local Rq (µm)')
+    
+    # ========== Row 4: Advanced Analysis for Laser-Ceramicized Samples ==========
+    # 16. Directional Analysis (Anisotropy)
+    ax16 = plt.subplot(4, 5, 16, projection='polar')
+    # Compute gradient direction
+    grad_angle = np.arctan2(gy, gx)
+    valid_angles = grad_angle[~np.isnan(grad_angle)].flatten()
+    
+    # Create histogram in polar coordinates
+    n_bins = 36
+    bins = np.linspace(-np.pi, np.pi, n_bins+1)
+    hist, _ = np.histogram(valid_angles, bins=bins)
+    
+    theta = (bins[:-1] + bins[1:]) / 2
+    ax16.plot(theta, hist, linewidth=2, color='navy')
+    ax16.fill(theta, hist, alpha=0.3, color='navy')
+    ax16.set_title('Directional Distribution\\n(Surface Anisotropy)', fontsize=12, fontweight='bold', pad=20)
+    ax16.set_theta_zero_location('E')
+    ax16.set_theta_direction(1)
+    
+    # 17. Height-Gradient Correlation
+    ax17 = plt.subplot(4, 5, 17)
+    valid_height = data[~np.isnan(data) & ~np.isnan(gradient_mag)]
+    valid_grad = gradient_mag[~np.isnan(data) & ~np.isnan(gradient_mag)]
+    
+    # Sample for performance
+    if len(valid_height) > 10000:
+        indices = np.random.choice(len(valid_height), 10000, replace=False)
+        valid_height = valid_height[indices]
+        valid_grad = valid_grad[indices]
+    
+    ax17.hexbin(valid_height, valid_grad, gridsize=30, cmap='YlOrRd', mincnt=1)
+    ax17.set_title('Height-Gradient Correlation', fontsize=12, fontweight='bold')
+    ax17.set_xlabel('Height (µm)', fontsize=10)
+    ax17.set_ylabel('Gradient (µm/µm)', fontsize=10)
+    
+    # Compute correlation
+    corr = np.corrcoef(valid_height, valid_grad)[0, 1]
+    ax17.text(0.05, 0.95, f'ρ = {corr:.3f}', transform=ax17.transAxes, 
+              fontsize=10, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    # 18. Waviness Amplitude Map
+    ax18 = plt.subplot(4, 5, 18)
+    # Compute local amplitude of waviness
+    waviness_amp = np.abs(waviness)
+    im18 = ax18.imshow(waviness_amp, cmap='viridis', origin='lower', interpolation='nearest',
+                       extent=extent_um)
+    ax18.set_title('Waviness Amplitude\\n(Laser Scan Pattern)', fontsize=12, fontweight='bold')
+    ax18.set_xlabel('X (µm)', fontsize=10)
+    ax18.set_ylabel('Y (µm)', fontsize=10)
+    plt.colorbar(im18, ax=ax18, label='|Waviness| (µm)')
+    
+    # 19. Curvature Map
+    ax19 = plt.subplot(4, 5, 19)
+    # Compute mean curvature (Laplacian)
+    from scipy.ndimage import laplace
+    curvature = laplace(np.nan_to_num(data, nan=np.nanmean(data))) / (pixel_spacing_um**2)
+    curvature[np.isnan(data)] = np.nan
+    
+    im19 = ax19.imshow(curvature, cmap='RdBu_r', origin='lower', interpolation='nearest',
+                       extent=extent_um, vmin=-np.nanstd(curvature)*3, vmax=np.nanstd(curvature)*3)
+    ax19.set_title('Mean Curvature\\n(Laplacian)', fontsize=12, fontweight='bold')
+    ax19.set_xlabel('X (µm)', fontsize=10)
+    ax19.set_ylabel('Y (µm)', fontsize=10)
+    plt.colorbar(im19, ax=ax19, label='∇²z (1/µm)')
+    
+    # 20. Summary Statistics Panel
+    ax20 = plt.subplot(4, 5, 20)
+    ax20.axis('off')
+    
+    stats_text = f"""
+    SURFACE ANALYSIS SUMMARY
+    
+    Height Statistics:
+      Mean: {np.nanmean(data):.2f} µm
+      Std: {np.nanstd(data):.2f} µm
+      Range: {np.nanmax(data) - np.nanmin(data):.2f} µm
+    
+    Roughness (Rq): {np.sqrt(np.nanmean(roughness**2)):.3f} µm
+    Roughness (Ra): {np.nanmean(np.abs(roughness)):.3f} µm
+    
+    Waviness (RMS): {np.sqrt(np.nanmean(waviness**2)):.3f} µm
+    
+    Mean Gradient: {np.nanmean(valid_gradients):.4f}
+    Max Gradient: {np.nanmax(valid_gradients):.4f}
+    
+    Coverage: {coverage_before_interp:.1f}%
+    Interpolated: {metadata.get('interpolation_method', 'None')}
+    
+    Pixel Spacing: {pixel_spacing_um:.3f} µm/px
+    """
+    
+    ax20.text(0.1, 0.9, stats_text, transform=ax20.transAxes, 
+              fontsize=10, verticalalignment='top', family='monospace',
+              bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
     
     # Add overall title with metadata
     filename = Path(metadata['filepath']).name
-    fig.suptitle(f'Optical Profilometry Analysis: {filename}\n' + 
+    fig.suptitle(f'Comprehensive Profilometry Analysis: {filename}\n' + 
                  f'Resolution: {data.shape[0]}x{data.shape[1]} pixels ' +
-                 f'({data.shape[0]*pixel_spacing_um:.0f}×{data.shape[1]*pixel_spacing_um:.0f} µm, ' +
-                 f'factor: {metadata["resolution_factor"]}x)',
-                 fontsize=16, fontweight='bold', y=0.99)
+                 f'({data.shape[0]*pixel_spacing_um:.0f}×{data.shape[1]*pixel_spacing_um:.0f} µm)',
+                 fontsize=16, fontweight='bold', y=0.995)
     
-    plt.tight_layout(rect=[0, 0, 1, 0.98])
+    plt.tight_layout(rect=[0, 0, 1, 0.99])
     
     # Save or show
     if output_dir:

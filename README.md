@@ -157,7 +157,267 @@ If you know the ceramic processing creates roughness that scales with local geom
 ### 3. **Downsampling**
 Optionally resolution for faster processing (2x, 4x, 8x, 16x, 32x).  Also optionally skip the visualizer rendering
 
-### 4. **Export to Blender**
+### 4. **Advanced Analytical Visualizations**
+
+The enhanced visualization system (4×5 grid, 20 subplots) includes multiple analytical plots specifically designed for laser-ceramicized surface characterization:
+
+#### 4.1. Dual Histograms & Cross-Sections
+
+**Purpose:** Compare original height distribution with roughness component to understand how surface texture relates to overall topology.
+
+**Code:**
+```python
+# Dual histogram with twin axes
+ax2.hist(valid_data, bins=80, color='green', alpha=0.5, label='Height')
+ax2_twin = ax2.twiny()
+ax2_twin.hist(valid_roughness, bins=80, color='blue', alpha=0.5, label='Roughness')
+
+# Dual cross-section with twin y-axes
+ax6.plot(x_positions_um, h_profile_height, color='green')
+ax6_twin = ax6.twinx()
+ax6_twin.plot(x_positions_um, h_profile_roughness, color='blue')
+```
+
+**Design Choice:** Overlaid histograms with separate x-axes  
+**Alternative:** Side-by-side subplots (easier to read exact values but harder to compare distributions)  
+**Sample Knowledge:** If you know laser lines create bimodal height distribution (peaks vs valleys), overlaid histograms quickly reveal whether roughness is uniform or varies with height.
+
+#### 4.2. Power Spectral Density (PSD)
+
+**Purpose:** Identify dominant spatial frequencies in the surface, revealing periodic structures from laser scanning.
+
+**Code:**
+```python
+# Compute 2D FFT and radially average
+fft2 = np.fft.fft2(data_filled)
+psd2 = np.abs(fft2)**2
+
+# Radial averaging
+r = np.sqrt((x_idx - cx)**2 + (y_idx - cy)**2).astype(int)
+for i in range(r_max):
+    mask = (r == i)
+    psd_radial[i] = np.mean(psd2[mask])
+
+# Convert to spatial frequency
+freq_um = np.fft.fftfreq(2*r_max, pixel_spacing_um)[:r_max]
+ax.loglog(freq_um[1:], psd_radial[1:])
+```
+
+**Design Choice:** Radially averaged 1D PSD on log-log plot  
+**Alternatives:**
+- **2D PSD heatmap:** Shows directional frequency content (use if laser scan direction is unknown)
+- **Directional PSD slices:** Extract PSD along specific angles (use if scan pattern is known)
+- **Welch's method:** Averages multiple overlapping windows for noise reduction
+
+**Sample Knowledge:**  
+- If laser scan line spacing is ~100µm, expect PSD peak at 1/100µm = 0.01 cycles/µm
+- If processing creates self-affine fractal roughness, PSD shows power-law decay (straight line on log-log)
+- Deviation from power-law at specific frequencies reveals characteristic length scales
+
+#### 4.3. Autocorrelation Function
+
+**Purpose:** Detect periodicity and measure correlation length, indicating how quickly surface features decorrelate spatially.
+
+**Code:**
+```python
+from scipy.signal import correlate2d
+
+data_centered = data_filled - np.nanmean(data_filled)
+autocorr = correlate2d(data_centered, data_centered, mode='same')
+autocorr /= autocorr[cy, cx]  # Normalize to 1 at zero lag
+
+# Plot central slice
+autocorr_slice = autocorr[cy, cx:]
+lag_um = np.arange(len(autocorr_slice)) * pixel_spacing_um
+ax.plot(lag_um, autocorr_slice)
+ax.axhline(np.exp(-1), color='red', label='e⁻¹')  # Correlation length marker
+```
+
+**Design Choice:** Normalize to unity at zero lag, plot 1D slice  
+**Alternatives:**
+- **2D autocorrelation heatmap:** Reveals anisotropic correlation (elliptical vs circular)
+- **Fit exponential decay:** Extract correlation length quantitatively
+- **Structure function:** Alternative to autocorrelation, sometimes preferred for fractal surfaces
+
+**Sample Knowledge:**  
+- Distance to first zero-crossing ≈ laser scan line spacing
+- Correlation length (where autocorr = e⁻¹) indicates feature size
+- Multiple oscillations suggest periodic structure; fast decay suggests random roughness
+- For laser-ceramicized samples, expect periodicity at scan line spacing
+
+#### 4.4. Abbott-Firestone Curve (Bearing Ratio)
+
+**Purpose:** Material bearing capacity analysis - shows what fraction of surface area lies above any given height threshold.
+
+**Code:**
+```python
+sorted_heights = np.sort(valid_data)[::-1]  # Descending order
+bearing_ratio = np.arange(len(sorted_heights)) / len(sorted_heights) * 100
+
+ax.plot(bearing_ratio, sorted_heights)
+ax.axhline(np.nanmean(data), color='red', label='Mean')
+```
+
+**Design Choice:** Plot all data points (smooth curve)  
+**Alternatives:**
+- **ISO 4287 standardized intervals:** Report only at specific bearing ratios (10%, 50%, 90%)
+- **Core roughness depth (Rk):** Measure from 40% to 90% material ratio
+- **Reduced peak/valley heights:** Report Rpk (peaks) and Rvk (valleys) separately
+
+**Sample Knowledge:**  
+- Shallow slope indicates uniform surface (polished wafer)
+- Steep slope in middle indicates bimodal distribution (peaks and valleys from laser lines)
+- If load-bearing is critical, focus on high bearing ratio region (>80%)
+- For laser-ceramicized samples, expect step-like transitions at peak/valley heights
+
+#### 4.5. Directional Analysis (Anisotropy)
+
+**Purpose:** Polar histogram of surface gradient directions reveals preferential orientation from laser scan patterns.
+
+**Code:**
+```python
+# Compute gradient direction
+gy, gx = np.gradient(data)
+grad_angle = np.arctan2(gy, gx)
+
+# Polar histogram
+n_bins = 36
+bins = np.linspace(-np.pi, np.pi, n_bins+1)
+hist, _ = np.histogram(valid_angles, bins=bins)
+
+theta = (bins[:-1] + bins[1:]) / 2
+ax_polar.plot(theta, hist)
+ax_polar.fill(theta, hist, alpha=0.3)
+```
+
+**Design Choice:** 36 bins (10° resolution) on polar plot  
+**Alternatives:**
+- **Rose diagram:** Weighted by gradient magnitude (emphasizes steep slopes)
+- **Coarser binning (18 bins):** Reduces noise but loses detail
+- **Fourier analysis of angles:** Quantify anisotropy degree mathematically
+
+**Sample Knowledge:**  
+- Circular distribution suggests isotropic (random) surface
+- Bimodal peaks ±90° apart suggest perpendicular scan lines (crosshatch)
+- Single dominant direction indicates unidirectional scanning
+- For laser-ceramicized samples with raster scanning, expect strong peaks at scan direction ± 90°
+
+#### 4.6. Local Roughness Map
+
+**Purpose:** Spatial variation in roughness reveals process non-uniformities or intentional patterns.
+
+**Code:**
+```python
+from scipy.ndimage import generic_filter
+
+def local_rms(values):
+    return np.sqrt(np.nanmean(values**2))
+
+window_size = max(5, data.shape[0] // 32)  # Adaptive window
+local_roughness = generic_filter(roughness, local_rms, 
+                                  size=window_size, mode='constant')
+
+ax.imshow(local_roughness, cmap='plasma')
+```
+
+**Design Choice:** RMS in sliding window, window size = data_size/32  
+**Alternatives:**
+- **Fixed window size:** Use known feature size (e.g., 100µm for laser spacing)
+- **Ra instead of RMS:** Less sensitive to outliers
+- **Percentile-based:** Use 95th percentile for peak roughness mapping
+
+**Sample Knowledge:**  
+- If laser power varies across scan, expect roughness gradient
+- If edge effects occur, roughness increases near boundaries
+- For multi-pass scanning, overlap regions may show different roughness
+- Window size should be >> roughness wavelength but << pattern wavelength
+
+#### 4.7. Slope Distribution
+
+**Purpose:** Histogram of surface gradients indicates steepness distribution, important for optical/fluid contact properties.
+
+**Code:**
+```python
+gy, gx = np.gradient(np.nan_to_num(data, nan=0))
+gradient_mag = np.sqrt(gx**2 + gy**2) / pixel_spacing_um  # Dimensionless
+
+ax.hist(valid_gradients, bins=80, color='orangered')
+ax.axvline(np.mean(valid_gradients), color='black', linestyle='--',
+           label=f'Mean: {np.mean(valid_gradients):.3f}')
+```
+
+**Design Choice:** L2 norm (magnitude), normalized by pixel spacing  
+**Alternatives:**
+- **Separate x/y components:** Reveals directional bias in slopes
+- **Log scale:** Better visualization if distribution spans decades
+- **Angular units:** Convert to degrees (arctan) for intuitive interpretation
+
+**Sample Knowledge:**  
+- Mean gradient indicates average steepness (affects light scattering)
+- Rayleigh distribution suggests random Gaussian surface
+- If laser creates sharp edges, expect heavy tail (high gradients)
+- For biological cell adhesion studies, steep slopes (>0.5) may inhibit attachment
+
+#### 4.8. Height-Gradient Correlation
+
+**Purpose:** Hexbin scatter plot reveals whether tall/short regions are systematically steeper or flatter.
+
+**Code:**
+```python
+valid_height = data[~np.isnan(data) & ~np.isnan(gradient_mag)]
+valid_grad = gradient_mag[~np.isnan(data) & ~np.isnan(gradient_mag)]
+
+# Sample for performance
+if len(valid_height) > 10000:
+    indices = np.random.choice(len(valid_height), 10000, replace=False)
+    valid_height, valid_grad = valid_height[indices], valid_grad[indices]
+
+ax.hexbin(valid_height, valid_grad, gridsize=30, cmap='YlOrRd')
+corr = np.corrcoef(valid_height, valid_grad)[0, 1]
+ax.text(0.05, 0.95, f'ρ = {corr:.3f}', ...)
+```
+
+**Design Choice:** Hexbin (2D histogram), sample to 10k points  
+**Alternatives:**
+- **Scatter plot with alpha:** Shows all points but slower
+- **2D Gaussian fit:** Quantify correlation ellipse
+- **Conditional statistics:** Plot mean gradient vs height bins
+
+**Sample Knowledge:**  
+- Positive correlation: peaks are steeper (volcano-like features)
+- Negative correlation: valleys are steeper (trenches)
+- Zero correlation: gradient independent of height (ideal for many processes)
+- For laser-ablated ceramics, positive correlation suggests material removal creates craters
+
+#### 4.9. Waviness Amplitude & Curvature Maps
+
+**Waviness Amplitude:**
+```python
+waviness_amp = np.abs(waviness)
+ax.imshow(waviness_amp, cmap='viridis')
+```
+Shows where medium-scale features (laser scan lines) have largest amplitude. Useful for identifying scan pattern geometry.
+
+**Curvature (Laplacian):**
+```python
+from scipy.ndimage import laplace
+curvature = laplace(data) / (pixel_spacing_um**2)
+ax.imshow(curvature, cmap='RdBu_r', vmin=-3*std, vmax=3*std)
+```
+
+**Design Choice:** Mean curvature via Laplacian operator  
+**Alternatives:**
+- **Gaussian curvature:** Product of principal curvatures (detects saddle points)
+- **Principal curvatures:** Eigenvalues of Hessian matrix (shows max/min curvature)
+- **Bilateral filtering:** Smooth before computing curvature to reduce noise
+
+**Sample Knowledge:**  
+- High curvature regions are stress concentrators (fracture initiation sites)
+- Positive curvature = peaks/bumps, negative = valleys/dips
+- For laser-ceramicized samples, scan line edges show high curvature
+- Curvature maps help identify features for targeted AFM follow-up
+
+### 5. **Export to Blender**
 Optionally export roughness map as OBJ file for 3D visualization in Blender
 
 ## Command-Line Options
@@ -220,12 +480,6 @@ The XYZ files have the following structure:
     - it is not clear as of this commit (2/10/26) how to translate this into physical distance.  The values that result from the header scalar do not match intuition (the line spacing should be ~100 microns)
   - Z: Height value
     - it is not yet totally clear as of this commit (2/10/26) if these values are in um or if the header contains the scalar from meters which would differe by a factor of ~5
-
-## Interpolation Methods for NaN Points
-
-- Bilinear
-- Laplacian
-- Kriging
 
 ## Downsampling and other performance flags
 
