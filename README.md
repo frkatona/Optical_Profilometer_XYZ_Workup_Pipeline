@@ -6,6 +6,8 @@ The pipeline interpolates missing data, decomposes the surface into frequency re
 
 It is meant to be run from the command line with various flags to control the analysis, and can be used to generate a single analysis or batch process multiple files.
 
+Continue reading for details or skip to the [PCD data analysis section](#PCD_images_(week_of_2026-02-09)) 
+
 ---
 
 ## Example exports: 
@@ -248,7 +250,7 @@ Alternative (unimplemented) similar methods to consider in the future include:
 
 Auto-correlation functions (ACF) measure correlation between a set of data and a shifted ("lagged") copy of itself at various distances, often used to evaluate periodicity. 
 
-![alt text](exports/analysis_images/Autocorrelation.jpg)
+![auto-correlation](exports/analysis_images/Autocorrelation.jpg)
 
 - Where autocorr = e⁻¹ is sometimes referred to as the "correlation length" (aka the "texture scale")
 - Multiple oscillations suggest periodic structure; fast decay suggests random roughness
@@ -469,7 +471,6 @@ The XYZ files have the following structure:
   - Z: Height value
     - it is not yet totally clear as of this commit (2/10/26) if these values are in um or if the header contains the scalar from meters which would differe by a factor of ~5
 
-
 ---
 
 # PCD images (week of 2026-02-09)
@@ -534,7 +535,7 @@ The XYZ files have the following structure:
 
 # Synthetic Interpolation Study
 
-The script `interpolation_study.py` provides a framework for validating interpolation strategies on synthetic 128x128 surfaces. It simulates realistic profilometry artifacts including stepped geometries and various noise distributions.
+The script `interpolation_study.py` provides a framework for validating interpolation strategies on synthetic 128x128 surfaces. It aims to replicate the kinds of artifacts and features expected in our PCD profilometry imaging, including stepped geometries and various distributions of noise for simulated data loss.
 
 ## Interpolation Methods & Formulae
 
@@ -563,11 +564,6 @@ $$\phi(r) = r^2 \ln(r)$$
 ## Features
 - **Noise Models**: Gaussian (Additive), Poisson (Shot), and Speckle (Multiplicative).
 - **Visualization**: Generates `comparison_<noise>_<mask_type>.png` plots showing Ground Truth, Masked Input, Reconstructions, and Difference Maps ($|Original - Reconstructed|$).
-
-## Usage
-```bash
-py interpolation_study.py
-```
 
 ---
 
@@ -617,6 +613,12 @@ py interpolation_study.py
   - the noise floor
   - sampling/Nyquist — aliasing near $f_{max} = 1/(2\Delta$)
   - instrument's transfer function (objective NA, coherence mode, lateral resolution chaning at high $f$)
+
+## Discussion
+- unless I'm missing something, it seems like the sample thickness must be both much greater than reported previously.  Precise thickness determinations are difficult because I can't find any good images where we can see the substrate, but even just the waviness variations span more than 10 um of height
+   - how thin would it need to be to be visible?  
+      - to interfere? could I angle it with the IR and see where interference arises?
+   - are the substrates that far away (/the samples that thick?) what's the maximum vertical distance the profilometer can see?  Is it more likely the sapphire is scattering the light?  --> try again but with (1) thinnest emissive coating on hand and/or (2) spatula-smudged edge/bevel to create a clear ramp leading from ~peak to surface visible from above
 
 ---
 
