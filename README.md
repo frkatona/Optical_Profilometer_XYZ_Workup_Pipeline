@@ -1,6 +1,10 @@
 # Optical Profilometry Analysis Pipeline
 
-This directory contains a python pipeline for analyzing and visualizing optical profilometry .xyz data.
+This project contains a python pipeline for generating comprehensive analysis from optical profilometry .xyz data.  
+
+The pipeline interpolates missing data, decomposes the surface into frequency regimes, and generates various statistics and visualizations on the surface topography, from height maps and histograms to autocorrelation and gradient distribution.
+
+It is meant to be run from the command line with various flags to control the analysis, and can be used to generate a single analysis or batch process multiple files.
 
 ---
 
@@ -18,12 +22,44 @@ This directory contains a python pipeline for analyzing and visualizing optical 
 
 ### interpolation method comparison
 ![gaussian scratch](exports/interpolation-methods/comparison_gaussian_scratch.png)
+
 ---
 
-## How it works
+## **The Pipeline**
 
-### 1. **NaN Interpolation Method**
-- **Bilinear**: 2D linear interpolation
+### 1. **NaN Interpolation**
+
+Optical profilometery can be error-prone when sample features (steepness, roughness, transparency, emissivity) prevent sufficient light from reaching the detector.  Forsooth, many of the raw images here appear to be missing more than 30% of their pixels (recorded NaN, or no value).  A haphazard accounting for this data can substantially alter analysis, and so we use a robust interpolation method to account for missing data.
+
+**Bilinear** 2D linear interpolation is the default method.  For extrapolation (at the edges of the dataset), it uses nearest neighbor interpolation.
+
+```py
+# Get coordinates of valid points
+valid_mask = ~nan_mask
+y_valid, x_valid = np.where(valid_mask)
+z_valid = data[valid_mask]
+
+# Get coordinates of NaN points
+y_nan, x_nan = np.where(nan_mask)
+
+if len(y_nan) > 0 and len(y_valid) > 0:
+    # Interpolate
+    points = np.column_stack([y_valid, x_valid])
+    values = z_valid
+    xi = np.column_stack([y_nan, x_nan])
+    
+    # Use linear interpolation with nearest for extrapolation (edges/corners)
+    z_interp = griddata(points, values, xi, method='linear', fill_value=np.nan)
+    
+    # Fill remaining NaNs (at edges) with nearest neighbor
+    still_nan = np.isnan(z_interp)
+    if np.any(still_nan):
+        z_nearest = griddata(points, values, xi[still_nan], method='nearest')
+        z_interp[still_nan] = z_nearest
+    
+    result[nan_mask] = z_interp
+```
+
   - Laplacian and Kriging methods are available via the `-i` flag, though bilinear is the default and seems generally preferable for both speed and robustness
 
 ### 2. **Surface Decomposition**
@@ -72,7 +108,7 @@ if len(z_flat) > 6:
 A 2nd-order polynomial fit was chosen arbitrarily, though substantial 2nd-order form seems common in the samples analyzed so far
 
 
-A 1st-order fit (planar; remove 'tilt' and 'piston') would be simpler, but would neglect broad curvature of the sample surface
+A 1st-order fit (for removing pure 'tilt' and 'piston' planar orientations) would be simpler, but would neglect broad curvature of the sample surface
 
 3rd-order (or higher) functions and splines can model complex curvatures and distortions (thermal warping?), but I don't fully understand their utility here and did not want to risk over-fitting
 
@@ -94,9 +130,9 @@ residual_filled[np.isnan(residual_filled)] = np.nanmean(residual_filled)
 waviness = gaussian_filter(residual_filled, sigma=sigma_pixels)
 ```
 
-A 0.8mm Gaussian filter cut was chosen here.  Published metrology standards for filter cutoff values often cited include ISOs 4287, 4288, and 16610 (https://en.wikipedia.org/wiki/ISO_16610).  0.8mm appears to be a reasonable initial guess, though I have not yet followed through with checking the roughness at other filter cutoffs (e.g., https://www.mahr.com/en-us/news-events/article-view/surface-measurement-selecting-the-correct-filter).  Smaller cutoffs will move more features into the 'roughness' category and higher cutoffs will move more features into the 'waviness' category.
+A 0.8mm Gaussian filter cut was chosen here.  Published metrology standards for filter cutoff values often cited include ISOs 4287, 4288, and 16610 (see [ISO 16610 Wikipedia](https://en.wikipedia.org/wiki/ISO_16610)).  0.8mm appears to be a reasonable initial guess, though I have not yet followed through with checking the roughness at other filter cutoffs (e.g., see post on [Filter Selection](https://www.mahr.com/en-us/news-events/article-view/surface-measurement-selecting-the-correct-filter)).  Smaller cutoffs will move more features into the 'roughness' category and higher cutoffs will move more features into the 'waviness' category.
 
-Other filters are possible (e.g., band-pass, median), but Gaussian appears to be the standard.
+Other filters are possible (e.g., band-pass, median), but Gaussian appears to be the standard.  A "robust" Gaussian may be worth exploring (see post on [Robust Gaussian Filtering](https://www.taylor-hobson.com/-/media/ametektaylorhobson/resourcelibraryassets/tech-notes/pdf/t170---robust-gaussian-filtering_en.pdf?la=en&revision=366bfa9d-acfe-46cf-a140-3a9b7635a6c9?download=1))
 
 For markings on the scale of 10s of microns with ~100µm line spacing which appear on samples after laser processing, the 0.8mm (800 um) cutoff above the feature size, so some periodic patterns may appear in the waviness regime. As such, it may be worth playing with lower cutoffs to see if waviness with minimized periodicity grants any better insights into sample uniformity.
 
@@ -113,14 +149,15 @@ Removing the low-frequency regimes effectively high-pass filters the surface, le
  - normalized roughness (relative to waviness amplitude) where it scales with local geometry (e.g., rougher in the valleys vs the peaks)
 
 ### 3. **Downsampling**
-All stages of the pipeline can be dramatically accelerated with smaller data to sample from, with full sampling taking sometimes 3-5 minutes from raw file processing to visualization. The downsampling CLI flag `-r` can be used to reduce effective resolution for faster processing at scales of powers of 2 (2x, 4x, 8x, 16x, 32x).  Also optionally skip the visualizer rendering with the `-v` flag.
+All stages of the pipeline can be dramatically accelerated with smaller data to sample from, with full sampling taking sometimes more than 10 min between raw file processing and rendering. The downsampling CLI flag `-r` can be used to reduce effective resolution for faster processing at scales of powers of 2 (2x, 4x, 8x, 16x, 32x).  Also optionally skip the visualizer rendering with the `-v` flag.
 
-Do note that this implementation 'mean pools' (averages) rather than 'decimates' (excludes) data which has meaningful consequences when calculating coverage and roughness.  As such, try to use the full resolution when drawing conclusions from the data which rely on the authenticity of high frequency features.
+Do note that this implementation 'mean pools' (averages) rather than 'decimates' (excludes) data, which has meaningful consequences for calculations of coverage and roughness, particularly in regions with higher NaN content.  As such, try to use the full resolution when drawing conclusions from the data which rely on the authenticity of high frequency features or when the reported NaN content is particularly high.
 
 ### 4. **Statistical Analysis**
 
 A breakdown of the file's metadata, as well as height statistics and roughness parameters are provided by the `statistics.txt` output file.  To skip to this export in the pipeline, use the `--stats-only` flag
 
+Example output:
 ```
 Optical Profilometry Analysis
 File: ceramics\PCD_01mm_2.75x_05x_001.xyz
@@ -173,7 +210,11 @@ Compares original height distribution with roughness component to understand how
 
 #### 4.2. Power Spectral Density (PSD)
 
-**Purpose:** Identify dominant spatial frequencies in the surface, revealing periodic structures from laser scanning.
+Radially averaged 1D PSD on log-log plot for the identification of dominant spatial frequencies in the surface, revealing periodic structures.
+
+- E.g., for scan line spacing of 100µm, notice PSD peaking at 1/100µm = 0.01 cycles/µm
+- When processing creates self-affine fractal roughness, PSD shows power-law decay (straight line on log-log)
+- Deviation from power-law at specific frequencies reveals characteristic length scales
 
 **Code:**
 ```python
@@ -192,22 +233,22 @@ freq_um = np.fft.fftfreq(2*r_max, pixel_spacing_um)[:r_max]
 ax.loglog(freq_um[1:], psd_radial[1:])
 ```
 
-**Design Choice:** Radially averaged 1D PSD on log-log plot  
-**Alternatives:**
+Alternative (unimplemented) similar methods to consider in the future include:
+
 - **2D PSD heatmap:** Shows directional frequency content (use if laser scan direction is unknown)
 - **Directional PSD slices:** Extract PSD along specific angles (use if scan pattern is known)
 - **Welch's method:** Averages multiple overlapping windows for noise reduction
 
-**Sample Knowledge:**  
-- If laser scan line spacing is ~100µm, expect PSD peak at 1/100µm = 0.01 cycles/µm
-- If processing creates self-affine fractal roughness, PSD shows power-law decay (straight line on log-log)
-- Deviation from power-law at specific frequencies reveals characteristic length scales
-
 #### 4.3. Autocorrelation Function
 
-**Purpose:** Detect periodicity and measure correlation length, indicating how quickly surface features decorrelate spatially.
+Auto-correlation functions (ACF) measure correlation between a set of data and a shifted ("lagged") copy of itself at various distances, often used to evaluate periodicity. 
 
-**Code:**
+- Where autocorr = e⁻¹ is sometimes referred to as the "correlation length" (aka the "texture scale")
+- Multiple oscillations suggest periodic structure; fast decay suggests random roughness
+- For lased samples, high periodicity is expected at scan-line spacing and its multiples
+
+The ACF implemented here was normalized at zero lag and plotted as a 1D slice:
+
 ```python
 from scipy.signal import correlate2d
 
@@ -222,23 +263,18 @@ ax.plot(lag_um, autocorr_slice)
 ax.axhline(np.exp(-1), color='red', label='e⁻¹')  # Correlation length marker
 ```
 
-**Design Choice:** Normalize to unity at zero lag, plot 1D slice  
-**Alternatives:**
+Alternative (unimplemented) similar methods to consider in the future include:
+
 - **2D autocorrelation heatmap:** Reveals anisotropic correlation (elliptical vs circular)
 - **Fit exponential decay:** Extract correlation length quantitatively
-- **Structure function:** Alternative to autocorrelation, sometimes preferred for fractal surfaces
+- **Structure function:** Sometimes preferred for fractal surfaces
 
-**Sample Knowledge:**  
-- Distance to first zero-crossing ≈ laser scan line spacing
-- Correlation length (where autocorr = e⁻¹) indicates feature size
-- Multiple oscillations suggest periodic structure; fast decay suggests random roughness
-- For laser-ceramicized samples, expect periodicity at scan line spacing
+#### 4.4. Bearing Ratio (Abbott-Firestone Curve)
 
-#### 4.4. Abbott-Firestone Curve (Bearing Ratio)
+The Abbot-Firestone curve is another way of illustrating the height distribution. It shows what fraction of surface area lies above any given height threshold. Supposedly, it is sometimes preferred over (alongside?) the histogram in engineering contexts where its features help highlight texture, wear, and lubrication retention.
 
-**Purpose:** Material bearing capacity analysis - shows what fraction of surface area lies above any given height threshold.
+Shallow slopes indicate a uniform surface (e.g., smooth/polished wafers).  Steep slopes in the middle indicate bimodal distributions (e.g., peaks and valleys from laser lines).  In lased samples, we can look for stepped transitions at peak/valley heights.
 
-**Code:**
 ```python
 sorted_heights = np.sort(valid_data)[::-1]  # Descending order
 bearing_ratio = np.arange(len(sorted_heights)) / len(sorted_heights) * 100
@@ -247,23 +283,16 @@ ax.plot(bearing_ratio, sorted_heights)
 ax.axhline(np.nanmean(data), color='red', label='Mean')
 ```
 
-**Design Choice:** Plot all data points (smooth curve)  
-**Alternatives:**
-- **ISO 4287 standardized intervals:** Report only at specific bearing ratios (10%, 50%, 90%)
-- **Core roughness depth (Rk):** Measure from 40% to 90% material ratio
-- **Reduced peak/valley heights:** Report Rpk (peaks) and Rvk (valleys) separately
-
-**Sample Knowledge:**  
-- Shallow slope indicates uniform surface (polished wafer)
-- Steep slope in middle indicates bimodal distribution (peaks and valleys from laser lines)
-- If load-bearing is critical, focus on high bearing ratio region (>80%)
-- For laser-ceramicized samples, expect step-like transitions at peak/valley heights
-
 #### 4.5. Directional Analysis (Anisotropy)
 
-**Purpose:** Polar histogram of surface gradient directions reveals preferential orientation from laser scan patterns.
+A polar histogram of surface gradient directions reveals preferential orientations in existing textural patterns.
 
-**Code:**
+- Circular distribution suggests isotropic (random) surface
+- Bimodal peaks ±90° apart indicate perpendicular scan lines (like the crosshatch), and the comparative strength may help evaluate any dependence on the order of the scans
+- For laser-ceramicized samples with raster scanning, expect strong peaks at scan direction ± 90°
+
+This implementation uses 36 bins (10° resolution) on polar plot (coarser binning may reduce noise, but also detail):
+
 ```python
 # Compute gradient direction
 gy, gx = np.gradient(data)
@@ -279,17 +308,10 @@ ax_polar.plot(theta, hist)
 ax_polar.fill(theta, hist, alpha=0.3)
 ```
 
-**Design Choice:** 36 bins (10° resolution) on polar plot  
-**Alternatives:**
-- **Rose diagram:** Weighted by gradient magnitude (emphasizes steep slopes)
-- **Coarser binning (18 bins):** Reduces noise but loses detail
-- **Fourier analysis of angles:** Quantify anisotropy degree mathematically
+Alternative (unimplemented) similar methods to consider in the future include:
 
-**Sample Knowledge:**  
-- Circular distribution suggests isotropic (random) surface
-- Bimodal peaks ±90° apart suggest perpendicular scan lines (crosshatch)
-- Single dominant direction indicates unidirectional scanning
-- For laser-ceramicized samples with raster scanning, expect strong peaks at scan direction ± 90°
+- **Rose diagram:** Weighted by gradient magnitude (emphasizes steep slopes)
+- **Fourier analysis of angles:** Possibly more explicit characterization of anisotropy
 
 #### 4.6. Local Roughness Map
 
