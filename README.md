@@ -20,39 +20,24 @@ This directory contains a python pipeline for analyzing and visualizing optical 
 ![gaussian scratch](exports/interpolation-methods/comparison_gaussian_scratch.png)
 ---
 
-## Files
-
-- **`analyze_profilometry.py`** - Main analysis script
-- **`ceramics/`** - Directory containing XYZ data files (1024×1024 height measurements)
-
-## Requirements
-
-```bash
-pip install numpy matplotlib scipy
-```
-
 ## How it works
 
-### 1. **NaN Interpolation Methods**
-- **Bilinear**: Fast 2D linear interpolation (fastest)
-- **Laplacian**: Laplace equation smooth interpolation (slow)
-- **Kriging**: RBF-based smooth interpolation (slowest)
+### 1. **NaN Interpolation Method**
+- **Bilinear**: 2D linear interpolation
+  - Laplacian and Kriging methods are available via the `-i` flag, though bilinear is the default and seems generally preferable for both speed and robustness
 
 ### 2. **Surface Decomposition**
 
-The surface decomposition separates the measured height map into three physically meaningful components that correspond to different spatial frequency regimes:
+The surface is decomposed into three spatial frequency regimes:
 
 - **Form**: Large-scale shape (polynomial fit)
-- **Waviness**: Medium-scale features (Gaussian filtered, ~0.8mm cutoff)
-- **Roughness**: Fine-scale texture (residual after form & waviness removal)
-
-#### Implementation Details and Design Choices
+- **Waviness**: Medium-scale features (Gaussian/Weierstrass filter)
+- **Roughness**: Fine-scale texture (residual)
 
 The decomposition is performed by the `decompose_surface()` function in three sequential steps:
 
-##### Step 1: Form Extraction (Large-Scale Shape)
+##### Polynomial Form Extraction
 
-**Code:**
 ```python
 # 1. Form: Fit a 2nd order polynomial surface (large-scale shape)
 y_coords, x_coords = np.mgrid[0:data.shape[0], 0:data.shape[1]]
@@ -84,21 +69,15 @@ if len(z_flat) > 6:
     form = (A_full @ coeffs).reshape(data.shape)
 ```
 
-**Design Choice:** 2nd-order polynomial fit  
-**Alternative Approaches:**
-- **1st-order (planar) fit**: Simpler, removes only tilt and piston. Use for nearly flat samples.
-  - *When to use*: If you know the sample is intentionally flat (e.g., polished wafer) and only mounting tilt needs removal
-- **3rd or higher-order fit**: Captures more complex curvature. Use for intentionally curved samples.
-  - *When to use*: If the sample has known bowl-shaped deformation or complex macroscopic curvature
-- **Spline surface fit**: Very flexible, can model complex long-wavelength distortions
-  - *When to use*: For samples with systematic but non-polynomial distortion (e.g., thermal warping)
+A 2nd-order polynomial fit was chosen arbitrarily, though substantial 2nd-order form seems common in the samples analyzed so far
 
-**Sample Knowledge Influence:**  
-If you know the sample was mounted on a curved stage or has intentional macro-scale curvature from processing, you may want a higher polynomial order. For ceramic samples with only mounting tilt, 2nd-order is appropriate and prevents overfitting.
 
-##### Step 2: Waviness Extraction (Medium-Scale Features)
+A 1st-order fit (planar; remove 'tilt' and 'piston') would be simpler, but would neglect broad curvature of the sample surface
 
-**Code:**
+3rd-order (or higher) functions and splines can model complex curvatures and distortions (thermal warping?), but I don't fully understand their utility here and did not want to risk over-fitting
+
+##### Gaussian Filter Waviness Extraction
+
 ```python
 # 2. Remove form to get residual
 residual = data - form
@@ -115,76 +94,82 @@ residual_filled[np.isnan(residual_filled)] = np.nanmean(residual_filled)
 waviness = gaussian_filter(residual_filled, sigma=sigma_pixels)
 ```
 
-**Design Choice:** 0.8mm Gaussian filter cutoff  
-**Alternative Approaches:**
-- **ISO 4287/4288 standard filters**: Use standardized cutoffs (0.08mm, 0.25mm, 0.8mm, 2.5mm, 8mm)
-  - *When to use*: For comparing to published metrology standards or industry specs
-- **Smaller cutoff (e.g., 0.25mm)**: Moves more features into the "roughness" category
-  - *When to use*: If you know the relevant surface features are smaller (e.g., fine machining marks)
-- **Larger cutoff (e.g., 2.5mm)**: Moves more features into "waviness"
-  - *When to use*: If you're interested in larger-scale periodic patterns (e.g., wide laser scan lines)
-- **Band-pass filtering**: Extract a specific wavelength range rather than low-pass
-  - *When to use*: Isolating periodic structures with known spatial frequency
-- **Median filter instead of Gaussian**: More robust to outliers
-  - *When to use*: If your data has spikes or contamination that shouldn't influence waviness
+A 0.8mm Gaussian filter cut was chosen here.  Published metrology standards for filter cutoff values often cited include ISOs 4287, 4288, and 16610 (https://en.wikipedia.org/wiki/ISO_16610).  0.8mm appears to be a reasonable initial guess, though I have not yet followed through with checking the roughness at other filter cutoffs (e.g., https://www.mahr.com/en-us/news-events/article-view/surface-measurement-selecting-the-correct-filter).  Smaller cutoffs will move more features into the 'roughness' category and higher cutoffs will move more features into the 'waviness' category.
 
-**Sample Knowledge Influence:**  
-For laser-etched ceramics with ~100µm line spacing, the 0.8mm cutoff is well above the feature size, so the periodic pattern appears in "waviness". If you're studying finer features (sub-100µm grain structure), consider 0.25mm. If the relevant manufacturing defects are at larger scales, use 2.5mm.
+Other filters are possible (e.g., band-pass, median), but Gaussian appears to be the standard.
 
-##### Step 3: Roughness Calculation (Fine-Scale Texture)
+For markings on the scale of 10s of microns with ~100µm line spacing which appear on samples after laser processing, the 0.8mm (800 um) cutoff above the feature size, so some periodic patterns may appear in the waviness regime. As such, it may be worth playing with lower cutoffs to see if waviness with minimized periodicity grants any better insights into sample uniformity.
 
-**Code:**
+##### Residual Roughness Extraction
+
 ```python
 # 4. Roughness: Residual after removing waviness
 roughness = residual - waviness
 ```
 
-**Design Choice:** Simple subtraction (high-pass filtering)  
-**Alternative Approaches:**
-- **RMS-based normalization**: Scale roughness by local waviness amplitude
-  - *When to use*: If roughness magnitude varies systematically across the sample
-- **Detrended Fluctuation Analysis (DFA)**: Remove local trends at multiple scales
-  - *When to use*: For fractal or self-affine surfaces where scale-dependent analysis is needed
-- **Wavelet decomposition**: Multi-resolution analysis that separates scales more flexibly
-  - *When to use*: When you need to analyze roughness at multiple independent length scales simultaneously
-
-**Sample Knowledge Influence:**  
-If you know the ceramic processing creates roughness that scales with local geometry (e.g., rougher in valleys), consider normalized roughness. For most optical profilometry QC work, the simple residual is interpretable and standard.
-
-#### Summary of Key Decision Points
-
-1. **Polynomial order for form** → Depends on sample flatness and mounting
-2. **Waviness cutoff wavelength** → Should be larger than features of interest, smaller than sample size
-3. **Filter type (Gaussian vs. median vs. ISO)** → Gaussian is standard; median for noisy data; ISO for regulatory compliance
-4. **Roughness normalization** → Raw residual is typical; normalize if roughness varies spatially with known causes
+Removing the low-frequency regimes effectively high-pass filters the surface, leaving the fine-scale features.  This appears to be the standard method, but other techniques to explore for isolating these features could include:
+ - detrended fluctuation analysis (DFA) for fractals/self-affine surfaces for scale-dependent analysis
+ - wavelet decomposition for more flexible scale separation or multiple independent length scales of roughness
+ - normalized roughness (relative to waviness amplitude) where it scales with local geometry (e.g., rougher in the valleys vs the peaks)
 
 ### 3. **Downsampling**
-Optionally resolution for faster processing (2x, 4x, 8x, 16x, 32x).  Also optionally skip the visualizer rendering
+All stages of the pipeline can be dramatically accelerated with smaller data to sample from, with full sampling taking sometimes 3-5 minutes from raw file processing to visualization. The downsampling CLI flag `-r` can be used to reduce effective resolution for faster processing at scales of powers of 2 (2x, 4x, 8x, 16x, 32x).  Also optionally skip the visualizer rendering with the `-v` flag.
 
-### 4. **Advanced Analytical Visualizations**
+Do note that this implementation 'mean pools' (averages) rather than 'decimates' (excludes) data which has meaningful consequences when calculating coverage and roughness.  As such, try to use the full resolution when drawing conclusions from the data which rely on the authenticity of high frequency features.
 
-The enhanced visualization system (4×5 grid, 20 subplots) includes multiple analytical plots specifically designed for laser-ceramicized surface characterization:
+### 4. **Statistical Analysis**
+
+A breakdown of the file's metadata, as well as height statistics and roughness parameters are provided by the `statistics.txt` output file.  To skip to this export in the pipeline, use the `--stats-only` flag
+
+```
+Optical Profilometry Analysis
+File: ceramics\PCD_01mm_2.75x_05x_001.xyz
+Resolution Factor: 1x
+Interpolation Method: bilinear
+Processed Size: (1024, 1024)
+
+============================================================
+HEADER METADATA
+============================================================
+
+Lateral Sampling: 0.500 �m/pixel
+Vertical Scale: 0.578416 �m/unit
+Wavelength Parameter: 0.08
+Coherence Flag: 1
+Noise Floor Estimate: 5.880290e-06
+Acquisition Time: 2026-02-09 11:45:22
+
+============================================================
+STATISTICAL ANALYSIS
+============================================================
+
+Data Coverage:
+  Total points:   1,048,576
+  Valid points:   1,048,576
+  Missing points: 0
+  Coverage:       100.00%
+
+Height Statistics (�m):
+  Min:            5.424146
+  Max:            24.530035
+  Range:          19.105889
+  Mean:           14.357093
+  Median:         14.493928
+  Std Dev:        3.604031
+
+Surface Roughness Parameters (�m):
+  Ra (avg roughness):     2.880977
+  Rq (RMS roughness):     3.604031
+  Rz (max height):        19.105889
+```
+
+### 4. **Visual Analysis**
+
+The visualizer window displays various sublots (currently ~20) which are designed to provide a comprehensive analysis of the surface.  
 
 #### 4.1. Dual Histograms & Cross-Sections
 
-**Purpose:** Compare original height distribution with roughness component to understand how surface texture relates to overall topology.
-
-**Code:**
-```python
-# Dual histogram with twin axes
-ax2.hist(valid_data, bins=80, color='green', alpha=0.5, label='Height')
-ax2_twin = ax2.twiny()
-ax2_twin.hist(valid_roughness, bins=80, color='blue', alpha=0.5, label='Roughness')
-
-# Dual cross-section with twin y-axes
-ax6.plot(x_positions_um, h_profile_height, color='green')
-ax6_twin = ax6.twinx()
-ax6_twin.plot(x_positions_um, h_profile_roughness, color='blue')
-```
-
-**Design Choice:** Overlaid histograms with separate x-axes  
-**Alternative:** Side-by-side subplots (easier to read exact values but harder to compare distributions)  
-**Sample Knowledge:** If you know laser lines create bimodal height distribution (peaks vs valleys), overlaid histograms quickly reveal whether roughness is uniform or varies with height.
+Compares original height distribution with roughness component to understand how surface texture relates to overall topology.  For lased samples with likely bimodal height distribution (peaks vs valleys), overlaid histograms can help evaluate to what extent roughness is uniform or correlates to other features.
 
 #### 4.2. Power Spectral Density (PSD)
 
@@ -531,7 +516,6 @@ The XYZ files have the following structure:
 ## Notes
 
 - Interpolation fills NaN values *before* surface decomposition and visualization
-- Downsampling uses mean pooling (averaging valid points in each block)
 - Statistics should be computed only on valid (non-NaN) data points (**double check this is accurate**)
 - Pixel spacing and vertical scale factor extracted from header line 8 (**still figuring out if this is correct**)
 - A pixel size of ~0.5 um puts the Nyquist resolution at ~1 um.  

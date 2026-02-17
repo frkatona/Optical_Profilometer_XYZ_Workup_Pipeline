@@ -12,19 +12,10 @@ from mpl_toolkits.mplot3d import Axes3D
 import argparse
 import time
 from pathlib import Path
-from scipy import ndimage
 from scipy.interpolate import griddata, RBFInterpolator
 from scipy.ndimage import gaussian_filter, generic_filter, laplace
 from scipy.signal import correlate2d
-try:
-    from tqdm import tqdm
-    TQDM_AVAILABLE = True
-except ImportError:
-    TQDM_AVAILABLE = False
-    # Fallback: create a dummy tqdm that does nothing
-    def tqdm(iterable=None, **kwargs):
-        return iterable if iterable is not None else lambda x: x
-
+from tqdm import tqdm
 
 def load_xyz_file(filepath, resolution_factor=1):
     """
@@ -391,10 +382,7 @@ def decompose_surface(data, pixel_spacing_um):
         Roughness (fine-scale) - residual
     """
     print("\nDecomposing surface into form, waviness, and roughness...")
-    if TQDM_AVAILABLE:
-        pbar = tqdm(total=4, desc="Surface decomposition", leave=False)
-    else:
-        pbar = None
+    pbar = tqdm(total=4, desc="Surface decomposition", leave=False)
     
     # Handle NaN values by using only valid data
     valid_mask = ~np.isnan(data)
@@ -562,10 +550,7 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
         Original data before interpolation (for coverage map)
     """
     print("\nCreating enhanced visualizations...")
-    if TQDM_AVAILABLE:
-        viz_pbar = tqdm(total=20, desc="Building plots", unit="plot")
-    else:
-        viz_pbar = None
+    viz_pbar = tqdm(total=20, desc="Building plots", unit="plot")
     
     if output_dir:
         output_dir = Path(output_dir)
