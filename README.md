@@ -7,12 +7,14 @@ This directory contains a python pipeline for analyzing and visualizing optical 
 ## Example exports: 
 
 ### Topology processing
-![spaghetti at the wall](exports/spaghetti-at-the-wall.png)
+![spaghetti at the wall](exports/gamut.png)
 
 ---
 
 ### 3D rendering
 ![fresnel render](exports/fresnel-render.png)
+
+---
 
 ### interpolation method comparison
 ![gaussian scratch](exports/interpolation-methods/comparison_gaussian_scratch.png)

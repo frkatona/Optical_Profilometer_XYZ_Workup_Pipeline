@@ -16,6 +16,14 @@ from scipy import ndimage
 from scipy.interpolate import griddata, RBFInterpolator
 from scipy.ndimage import gaussian_filter, generic_filter, laplace
 from scipy.signal import correlate2d
+try:
+    from tqdm import tqdm
+    TQDM_AVAILABLE = True
+except ImportError:
+    TQDM_AVAILABLE = False
+    # Fallback: create a dummy tqdm that does nothing
+    def tqdm(iterable=None, **kwargs):
+        return iterable if iterable is not None else lambda x: x
 
 
 def load_xyz_file(filepath, resolution_factor=1):
@@ -150,6 +158,14 @@ def load_xyz_file(filepath, resolution_factor=1):
     if coherence_flag is not None:
         print(f"Coherence flag: {coherence_flag}")
     
+    # Report NaN statistics
+    total_points = data.size
+    nan_count = np.sum(np.isnan(data))
+    nan_fraction = nan_count / total_points
+    print(f"\nNaN Statistics:")
+    print(f"  NaN values: {nan_count:,} / {total_points:,} ({nan_fraction*100:.2f}%)")
+    print(f"  Valid values: {total_points - nan_count:,} ({(1-nan_fraction)*100:.2f}%)")
+    
     # Extract metadata
     metadata = {
         'header': header_lines,
@@ -252,7 +268,7 @@ def interpolate_nans(data, method='bilinear'):
         print("No NaN values to interpolate")
         return data.copy()
     
-    print(f"Interpolating NaN values using {method} method...")
+    print(f"\nInterpolating NaN values using {method} method...")
     start_time = time.time()
     
     result = data.copy()
@@ -374,7 +390,11 @@ def decompose_surface(data, pixel_spacing_um):
     roughness : np.ndarray
         Roughness (fine-scale) - residual
     """
-    print("Decomposing surface into form, waviness, and roughness...")
+    print("\nDecomposing surface into form, waviness, and roughness...")
+    if TQDM_AVAILABLE:
+        pbar = tqdm(total=4, desc="Surface decomposition", leave=False)
+    else:
+        pbar = None
     
     # Handle NaN values by using only valid data
     valid_mask = ~np.isnan(data)
@@ -410,8 +430,13 @@ def decompose_surface(data, pixel_spacing_um):
     else:
         form = np.full_like(data, np.nanmean(data))
     
+    if pbar:
+        pbar.update(1)  # Form complete
+    
     # 2. Remove form to get residual
     residual = data - form
+    if pbar:
+        pbar.update(1)  # Residual complete
     
     # 3. Waviness: Gaussian filter of residual
     # Cutoff wavelength for waviness: typically 0.8mm for surface analysis
@@ -423,9 +448,14 @@ def decompose_surface(data, pixel_spacing_um):
     residual_filled = residual.copy()
     residual_filled[np.isnan(residual_filled)] = np.nanmean(residual_filled)
     waviness = gaussian_filter(residual_filled, sigma=sigma_pixels)
+    if pbar:
+        pbar.update(1)  # Waviness complete
     
     # 4. Roughness: Residual after removing waviness
     roughness = residual - waviness
+    if pbar:
+        pbar.update(1)  # Roughness complete
+        pbar.close()
     
     return form, waviness, roughness
 
@@ -531,7 +561,11 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     original_data : np.ndarray, optional
         Original data before interpolation (for coverage map)
     """
-    print("Creating enhanced visualizations...")
+    print("\nCreating enhanced visualizations...")
+    if TQDM_AVAILABLE:
+        viz_pbar = tqdm(total=20, desc="Building plots", unit="plot")
+    else:
+        viz_pbar = None
     
     if output_dir:
         output_dir = Path(output_dir)
@@ -539,10 +573,11 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     
     # Get pixel spacing
     pixel_spacing_um = metadata['pixel_spacing_um']
+    pixel_spacing_mm = pixel_spacing_um / 1000.0  # Convert µm to mm
     
-    # Create extent for imshow (in microns)
-    extent_um = [0, data.shape[1] * pixel_spacing_um, 
-                 0, data.shape[0] * pixel_spacing_um]
+    # Create extent for imshow (in millimeters)
+    extent_mm = [0, data.shape[1] * pixel_spacing_mm, 
+                 0, data.shape[0] * pixel_spacing_mm]
     
     # Decompose surface into form, waviness, and roughness
     form, waviness, roughness = decompose_surface(data, pixel_spacing_um)
@@ -558,10 +593,10 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     # 1. 2D Height Map
     ax1 = plt.subplot(4, 5, 1)
     im1 = ax1.imshow(data, cmap='viridis', origin='lower', interpolation='nearest',
-                     extent=extent_um)
+                     extent=extent_mm)
     ax1.set_title('2D Height Map', fontsize=12, fontweight='bold')
-    ax1.set_xlabel('X (µm)', fontsize=10)
-    ax1.set_ylabel('Y (µm)', fontsize=10)
+    ax1.set_xlabel('X (mm)', fontsize=10)
+    ax1.set_ylabel('Y (mm)', fontsize=10)
     plt.colorbar(im1, ax=ax1, label='Height (µm)')
     
     # 2. Dual Histograms (Height + Roughness)
@@ -583,11 +618,11 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     ax3 = plt.subplot(4, 5, 3)
     coverage_map = ~np.isnan(data_for_coverage)
     im3 = ax3.imshow(coverage_map, cmap='RdYlGn', origin='lower', interpolation='nearest',
-                     extent=extent_um)
+                     extent=extent_mm)
     ax3.set_title(f'Data Coverage (Before Interp: {coverage_before_interp:.1f}%)', 
                   fontsize=12, fontweight='bold')
-    ax3.set_xlabel('X (µm)', fontsize=10)
-    ax3.set_ylabel('Y (µm)', fontsize=10)
+    ax3.set_xlabel('X (mm)', fontsize=10)
+    ax3.set_ylabel('Y (mm)', fontsize=10)
     plt.colorbar(im3, ax=ax3, label='Valid', ticks=[0, 1])
     
     # 4. 3D Surface Plot - Original Height Map
@@ -595,30 +630,30 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     plot_factor = max(1, data.shape[0] // 200)
     if plot_factor > 1:
         plot_data = data[::plot_factor, ::plot_factor]
-        plot_spacing = pixel_spacing_um * plot_factor
+        plot_spacing = pixel_spacing_mm * plot_factor
     else:
         plot_data = data
-        plot_spacing = pixel_spacing_um
+        plot_spacing = pixel_spacing_mm
     
-    x_um = np.arange(plot_data.shape[1]) * plot_spacing
-    y_um = np.arange(plot_data.shape[0]) * plot_spacing
-    X, Y = np.meshgrid(x_um, y_um)
+    x_mm = np.arange(plot_data.shape[1]) * plot_spacing
+    y_mm = np.arange(plot_data.shape[0]) * plot_spacing
+    X, Y = np.meshgrid(x_mm, y_mm)
     
     surf = ax4.plot_surface(X, Y, plot_data, cmap='viridis', 
                            linewidth=0, antialiased=True, alpha=0.9)
     ax4.set_title('3D Height Map', fontsize=12, fontweight='bold')
-    ax4.set_xlabel('X (µm)', fontsize=9)
-    ax4.set_ylabel('Y (µm)', fontsize=9)
+    ax4.set_xlabel('X (mm)', fontsize=9)
+    ax4.set_ylabel('Y (mm)', fontsize=9)
     ax4.set_zlabel('Z (µm)', fontsize=9)
     ax4.view_init(elev=30, azim=45)
     
     # 5. Roughness Map
     ax5 = plt.subplot(4, 5, 5)
     im5 = ax5.imshow(roughness, cmap='RdBu_r', origin='lower', interpolation='nearest',
-                     extent=extent_um, vmin=-np.nanstd(roughness)*3, vmax=np.nanstd(roughness)*3)
+                     extent=extent_mm, vmin=-np.nanstd(roughness)*3, vmax=np.nanstd(roughness)*3)
     ax5.set_title('Roughness (Fine-Scale)', fontsize=12, fontweight='bold')
-    ax5.set_xlabel('X (µm)', fontsize=10)
-    ax5.set_ylabel('Y (µm)', fontsize=10)
+    ax5.set_xlabel('X (mm)', fontsize=10)
+    ax5.set_ylabel('Y (mm)', fontsize=10)
     plt.colorbar(im5, ax=ax5, label='Roughness (µm)')
     
     # ========== Row 2: Cross-Sections and Profiles ==========
@@ -627,14 +662,14 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     mid_y = data.shape[0] // 2
     h_profile_height = data[mid_y, :]
     h_profile_roughness = roughness[mid_y, :]
-    x_positions_um = np.arange(len(h_profile_height)) * pixel_spacing_um
+    x_positions_mm = np.arange(len(h_profile_height)) * pixel_spacing_mm
     
-    ax6.plot(x_positions_um, h_profile_height, label='Height', linewidth=2, alpha=0.7, color='green')
+    ax6.plot(x_positions_mm, h_profile_height, label='Height', linewidth=2, alpha=0.7, color='green')
     ax6_twin = ax6.twinx()
-    ax6_twin.plot(x_positions_um, h_profile_roughness, label='Roughness', linewidth=2, alpha=0.7, color='blue')
+    ax6_twin.plot(x_positions_mm, h_profile_roughness, label='Roughness', linewidth=2, alpha=0.7, color='blue')
     
-    ax6.set_title(f'Horizontal Profile (Y={mid_y*pixel_spacing_um:.0f} µm)', fontsize=12, fontweight='bold')
-    ax6.set_xlabel('X Position (µm)', fontsize=10)
+    ax6.set_title(f'Horizontal Profile (Y={mid_y*pixel_spacing_mm:.2f} mm)', fontsize=12, fontweight='bold')
+    ax6.set_xlabel('X Position (mm)', fontsize=10)
     ax6.set_ylabel('Height (µm)', fontsize=10, color='green')
     ax6_twin.set_ylabel('Roughness (µm)', fontsize=10, color='blue')
     ax6.tick_params(axis='y', labelcolor='green')
@@ -646,14 +681,14 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     mid_x = data.shape[1] // 2
     v_profile_height = data[:, mid_x]
     v_profile_roughness = roughness[:, mid_x]
-    y_positions_um = np.arange(len(v_profile_height)) * pixel_spacing_um
+    y_positions_mm = np.arange(len(v_profile_height)) * pixel_spacing_mm
     
-    ax7.plot(y_positions_um, v_profile_height, label='Height', linewidth=2, alpha=0.7, color='green')
+    ax7.plot(y_positions_mm, v_profile_height, label='Height', linewidth=2, alpha=0.7, color='green')
     ax7_twin = ax7.twinx()
-    ax7_twin.plot(y_positions_um, v_profile_roughness, label='Roughness', linewidth=2, alpha=0.7, color='blue')
+    ax7_twin.plot(y_positions_mm, v_profile_roughness, label='Roughness', linewidth=2, alpha=0.7, color='blue')
     
-    ax7.set_title(f'Vertical Profile (X={mid_x*pixel_spacing_um:.0f} µm)', fontsize=12, fontweight='bold')
-    ax7.set_xlabel('Y Position (µm)', fontsize=10)
+    ax7.set_title(f'Vertical Profile (X={mid_x*pixel_spacing_mm:.2f} mm)', fontsize=12, fontweight='bold')
+    ax7.set_xlabel('Y Position (mm)', fontsize=10)
     ax7.set_ylabel('Height (µm)', fontsize=10, color='green')
     ax7_twin.set_ylabel('Roughness (µm)', fontsize=10, color='blue')
     ax7.tick_params(axis='y', labelcolor='green')
@@ -726,7 +761,7 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     # 11. Form (large-scale shape)
     ax11 = plt.subplot(4, 5, 11)
     im11 = ax11.imshow(form, cmap='coolwarm', origin='lower', interpolation='nearest',
-                       extent=extent_um)
+                       extent=extent_mm)
     ax11.set_title('Form (Large-Scale)', fontsize=12, fontweight='bold')
     ax11.set_xlabel('X (µm)', fontsize=10)
     ax11.set_ylabel('Y (µm)', fontsize=10)
@@ -735,7 +770,7 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     # 12. Waviness (medium-scale)
     ax12 = plt.subplot(4, 5, 12)
     im12 = ax12.imshow(waviness, cmap='seismic', origin='lower', interpolation='nearest',
-                       extent=extent_um, vmin=-np.nanstd(waviness)*3, vmax=np.nanstd(waviness)*3)
+                       extent=extent_mm, vmin=-np.nanstd(waviness)*3, vmax=np.nanstd(waviness)*3)
     ax12.set_title('Waviness (Medium-Scale)', fontsize=12, fontweight='bold')
     ax12.set_xlabel('X (µm)', fontsize=10)
     ax12.set_ylabel('Y (µm)', fontsize=10)
@@ -748,7 +783,7 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     gradient_mag[np.isnan(data)] = np.nan
     
     im13 = ax13.imshow(gradient_mag, cmap='hot', origin='lower', interpolation='nearest',
-                       extent=extent_um)
+                       extent=extent_mm)
     ax13.set_title('Surface Gradient', fontsize=12, fontweight='bold')
     ax13.set_xlabel('X (µm)', fontsize=10)
     ax13.set_ylabel('Y (µm)', fontsize=10)
@@ -778,10 +813,10 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     local_roughness = generic_filter(roughness, local_rms, size=window_size, mode='constant', cval=np.nan)
     
     im15 = ax15.imshow(local_roughness, cmap='plasma', origin='lower', interpolation='nearest',
-                       extent=extent_um)
+                       extent=extent_mm)
     ax15.set_title(f'Local RMS Roughness ({window_size}px window)', fontsize=12, fontweight='bold')
-    ax15.set_xlabel('X (µm)', fontsize=10)
-    ax15.set_ylabel('Y (µm)', fontsize=10)
+    ax15.set_xlabel('X (mm)', fontsize=10)
+    ax15.set_ylabel('Y (mm)', fontsize=10)
     plt.colorbar(im15, ax=ax15, label='Local Rq (µm)')
     
     # ========== Row 4: Advanced Analysis for Laser-Ceramicized Samples ==========
@@ -829,7 +864,7 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     # Compute local amplitude of waviness
     waviness_amp = np.abs(waviness)
     im18 = ax18.imshow(waviness_amp, cmap='viridis', origin='lower', interpolation='nearest',
-                       extent=extent_um)
+                       extent=extent_mm)
     ax18.set_title('Waviness Amplitude\\n(Laser Scan Pattern)', fontsize=12, fontweight='bold')
     ax18.set_xlabel('X (µm)', fontsize=10)
     ax18.set_ylabel('Y (µm)', fontsize=10)
@@ -843,7 +878,7 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     curvature[np.isnan(data)] = np.nan
     
     im19 = ax19.imshow(curvature, cmap='RdBu_r', origin='lower', interpolation='nearest',
-                       extent=extent_um, vmin=-np.nanstd(curvature)*3, vmax=np.nanstd(curvature)*3)
+                       extent=extent_mm, vmin=-np.nanstd(curvature)*3, vmax=np.nanstd(curvature)*3)
     ax19.set_title('Mean Curvature\\n(Laplacian)', fontsize=12, fontweight='bold')
     ax19.set_xlabel('X (µm)', fontsize=10)
     ax19.set_ylabel('Y (µm)', fontsize=10)
@@ -878,6 +913,11 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     ax20.text(0.1, 0.9, stats_text, transform=ax20.transAxes, 
               fontsize=10, verticalalignment='top', family='monospace',
               bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+    
+    # Close visualization progress bar
+    if viz_pbar:
+        viz_pbar.n = viz_pbar.total  # Set to 100%
+        viz_pbar.close()
     
     # Add overall title with metadata
     filename = Path(metadata['filepath']).name
@@ -934,9 +974,9 @@ Examples:
     parser.add_argument('-r', '--resolution-factor', type=int, default=1,
                        choices=[1, 2, 4, 8, 16, 32],
                        help='Resolution reduction factor for faster processing (default: 1)')
-    parser.add_argument('-i', '--interpolate', type=str, default=None,
+    parser.add_argument('-i', '--interpolate', type=str, default='bilinear',
                        choices=['bilinear', 'laplacian', 'kriging'],
-                       help='Interpolate NaN values using specified method (default: None)')
+                       help='Interpolate NaN values using specified method (default: bilinear)')
     parser.add_argument('--export-obj', action='store_true',
                        help='Export roughness map to OBJ file for Blender import')
     parser.add_argument('-o', '--output-dir', type=str, default=None,
