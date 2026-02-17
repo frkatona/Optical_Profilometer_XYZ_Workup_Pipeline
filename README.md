@@ -10,18 +10,16 @@ It is meant to be run from the command line with various flags to control the an
 
 ## Example exports: 
 
-### Topology processing
-![spaghetti at the wall](exports/gamut.png)
-
----
-
 ### 3D rendering
-![fresnel render](exports/fresnel-render.png)
+![alt text](exports/blender-renders/fresnel-render.png)
 
 ---
 
-### interpolation method comparison
-![gaussian scratch](exports/interpolation-methods/comparison_gaussian_scratch.png)
+### Image analysis gamut
+
+![alt text](exports/analysis_images/gamut.png)
+
+---
 
 ---
 
@@ -29,7 +27,9 @@ It is meant to be run from the command line with various flags to control the an
 
 ### 1. **NaN Interpolation**
 
-Optical profilometery can be error-prone when sample features (steepness, roughness, transparency, emissivity) prevent sufficient light from reaching the detector.  Forsooth, many of the raw images here appear to be missing more than 30% of their pixels (recorded NaN, or no value).  A haphazard accounting for this data can substantially alter analysis, and so we use a robust interpolation method to account for missing data.
+Optical profilometery can be error-prone when sample features (steepness, roughness, transparency, emissivity) prevent sufficient light from reaching the detector.  Forsooth, some of the raw images here are missing nearly half of their pixels (recorded NaN/no value).  A haphazard accounting for this data can substantially alter analysis, and so we use a robust interpolation method to account for missing data.
+
+![alt text](exports/analysis_images/DataCoverage.jpg)
 
 **Bilinear** 2D linear interpolation is the default method.  For extrapolation (at the edges of the dataset), it uses nearest neighbor interpolation.
 
@@ -60,7 +60,8 @@ if len(y_nan) > 0 and len(y_valid) > 0:
     result[nan_mask] = z_interp
 ```
 
-  - Laplacian and Kriging methods are available via the `-i` flag, though bilinear is the default and seems generally preferable for both speed and robustness
+Laplacian and Kriging methods are available via the `-i` flag, though bilinear is the default and seems generally preferable for both speed and robustness (see the included [Interpolation Method Comparison](#gaussian-random) image)
+
 
 ### 2. **Surface Decomposition**
 
@@ -69,6 +70,8 @@ The surface is decomposed into three spatial frequency regimes:
 - **Form**: Large-scale shape (polynomial fit)
 - **Waviness**: Medium-scale features (Gaussian/Weierstrass filter)
 - **Roughness**: Fine-scale texture (residual)
+
+![alt text](exports/analysis_images/decomposition.jpg)
 
 The decomposition is performed by the `decompose_surface()` function in three sequential steps:
 
@@ -204,19 +207,23 @@ Surface Roughness Parameters (�m):
 
 The visualizer window displays various sublots (currently ~20) which are designed to provide a comprehensive analysis of the surface.  
 
-#### 4.1. Dual Histograms & Cross-Sections
+#### 4.1. Histogram
 
 Compares original height distribution with roughness component to understand how surface texture relates to overall topology.  For lased samples with likely bimodal height distribution (peaks vs valleys), overlaid histograms can help evaluate to what extent roughness is uniform or correlates to other features.
+
+![alt text](exports/analysis_images/DualHistogram.jpg)
 
 #### 4.2. Power Spectral Density (PSD)
 
 Radially averaged 1D PSD on log-log plot for the identification of dominant spatial frequencies in the surface, revealing periodic structures.
 
-- E.g., for scan line spacing of 100µm, notice PSD peaking at 1/100µm = 0.01 cycles/µm
-- When processing creates self-affine fractal roughness, PSD shows power-law decay (straight line on log-log)
-- Deviation from power-law at specific frequencies reveals characteristic length scales
+![alt text](exports/analysis_images/PSD.jpg)
 
-**Code:**
+possibly useful, e.g.:
+- for scan line spacing of 100µm, notice PSD peaking at 1/100µm = 0.01 cycles/µm
+- when processing creates self-affine fractal roughness, PSD shows power-law decay (straight line on log-log)
+- where there is deviation from power-law at specific frequencies, revealing characteristic length scales
+
 ```python
 # Compute 2D FFT and radially average
 fft2 = np.fft.fft2(data_filled)
@@ -242,6 +249,8 @@ Alternative (unimplemented) similar methods to consider in the future include:
 #### 4.3. Autocorrelation Function
 
 Auto-correlation functions (ACF) measure correlation between a set of data and a shifted ("lagged") copy of itself at various distances, often used to evaluate periodicity. 
+
+![alt text](exports/analysis_images/Autocorrelation.jpg)
 
 - Where autocorr = e⁻¹ is sometimes referred to as the "correlation length" (aka the "texture scale")
 - Multiple oscillations suggest periodic structure; fast decay suggests random roughness
@@ -273,6 +282,8 @@ Alternative (unimplemented) similar methods to consider in the future include:
 
 The Abbot-Firestone curve is another way of illustrating the height distribution. It shows what fraction of surface area lies above any given height threshold. Supposedly, it is sometimes preferred over (alongside?) the histogram in engineering contexts where its features help highlight texture, wear, and lubrication retention.
 
+![alt text](exports/analysis_images/Abbot-Firestone.jpg)
+
 Shallow slopes indicate a uniform surface (e.g., smooth/polished wafers).  Steep slopes in the middle indicate bimodal distributions (e.g., peaks and valleys from laser lines).  In lased samples, we can look for stepped transitions at peak/valley heights.
 
 ```python
@@ -287,9 +298,10 @@ ax.axhline(np.nanmean(data), color='red', label='Mean')
 
 A polar histogram of surface gradient directions reveals preferential orientations in existing textural patterns.
 
+![alt text](exports/analysis_images/SurfaceAnistropy.jpg)
+
 - Circular distribution suggests isotropic (random) surface
 - Bimodal peaks ±90° apart indicate perpendicular scan lines (like the crosshatch), and the comparative strength may help evaluate any dependence on the order of the scans
-- For laser-ceramicized samples with raster scanning, expect strong peaks at scan direction ± 90°
 
 This implementation uses 36 bins (10° resolution) on polar plot (coarser binning may reduce noise, but also detail):
 
@@ -315,9 +327,12 @@ Alternative (unimplemented) similar methods to consider in the future include:
 
 #### 4.6. Local Roughness Map
 
-**Purpose:** Spatial variation in roughness reveals process non-uniformities or intentional patterns.
+Viewing roughness across a window size can magnify feature scales of interest.
 
-**Code:**
+![alt text](exports/analysis_images/LocalRMSRoughness.jpg)
+
+The local roughness map implemented here chose an adaptive window size of data_size/32, .
+
 ```python
 from scipy.ndimage import generic_filter
 
@@ -347,7 +362,6 @@ ax.imshow(local_roughness, cmap='plasma')
 
 **Purpose:** Histogram of surface gradients indicates steepness distribution, important for optical/fluid contact properties.
 
-**Code:**
 ```python
 gy, gx = np.gradient(np.nan_to_num(data, nan=0))
 gradient_mag = np.sqrt(gx**2 + gy**2) / pixel_spacing_um  # Dimensionless
@@ -373,7 +387,8 @@ ax.axvline(np.mean(valid_gradients), color='black', linestyle='--',
 
 **Purpose:** Hexbin scatter plot reveals whether tall/short regions are systematically steeper or flatter.
 
-**Code:**
+![alt text](exports/analysis_images/HeightGradient.jpg)
+
 ```python
 valid_height = data[~np.isnan(data) & ~np.isnan(gradient_mag)]
 valid_grad = gradient_mag[~np.isnan(data) & ~np.isnan(gradient_mag)]
@@ -550,57 +565,57 @@ The XYZ files have the following structure:
 
 ## Standard - 100 um scan interval (1)
 
-![alt text](exports/profilometery_workup_v1/standard_1.png)
+![alt text](exports/analysis_images/PCD_01mm_2.75x_05x_001.png)
 
 ## Standard - 100 um scan interval (2)
 
-![alt text](exports/profilometery_workup_v1/standard_2.png)
+![alt text](exports/analysis_images/PCD_01mm_2.75x_05x_002.png)
 
 ## Standard - 100 um scan interval (3)
 
-![alt text](exports/profilometery_workup_v1/standard_3.png)
+![alt text](exports/analysis_images/PCD_01mm_2.75x_05x_003.png)
 
 ---
 
 ## ? (1)
 
-![alt text](exports/profilometery_workup_v1/PCD_01mm_2.75x_05x_001.png)
+(placeholder)
 
 ## ? (2)
 
-![alt text](exports/profilometery_workup_v1/PCD_01mm_2.75x_05x_002.png)
+(placeholder)
 
 ## ? (3)
 
-![alt text](exports/profilometery_workup_v1/PCD_01mm_2.75x_05x_003.png)
+(placeholder)
 
 ---
 
 ## Cross-hatch (1)
 
-![alt text](exports/profilometery_workup_v1/crosshatch_1.png)
+![alt text](exports/analysis_images/PCD_01mmcrosshatch_2.75x_05x_001.png)
 
 ## Cross-hatch (2)
 
-![alt text](exports/profilometery_workup_v1/crosshatch_2.png)
+(placeholder)
 
 ## Cross-hatch (3)
 
-![alt text](exports/profilometery_workup_v1/crosshatch_3.png)
+(placeholder)
 
 ---
 
 ## 2x line density (1)
 
-![2x line density (1)](exports/profilometery_workup_v1/2x-line-density_1.png)
+(placeholder)
 
 ## 2x line density (2)
 
-![2x line density (2)](exports/profilometery_workup_v1/2x-line-density_2.png)
+(placeholder)
 
 ## 2x line density (3)
 
-![2x line density (3)](exports/profilometery_workup_v1/2x-line-density_3.png)
+(placeholder)
 
 ---
 
