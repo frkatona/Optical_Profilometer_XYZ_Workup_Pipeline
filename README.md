@@ -6,14 +6,16 @@ This directory contains a python pipeline for analyzing and visualizing optical 
 
 ## Example exports: 
 
-### Cross-hatch surface
-![crosshatch](exports/profilometery_workup_v1/crosshatch_1.png)
+### Topology processing
+![spaghetti at the wall](exports/spaghetti-at-the-wall.png)
 
 ---
 
 ### 3D rendering
 ![fresnel render](exports/fresnel-render.png)
 
+### interpolation method comparison
+![gaussian scratch](exports/interpolation-methods/comparison_gaussian_scratch.png)
 ---
 
 ## Files
@@ -601,11 +603,11 @@ The XYZ files have the following structure:
 If I'm interpreting the header info correctly (it's unlabeled, so maybe not), the instrument has a noise floor of a few microns, which sets the limit on measurable surface features.  Ra/Rq values should be compared to noise floor for if this is true.
 
 ## To-do
-- show the data coverage before (maybe also after like this) to better tell whether the interpolation mode was appropriate (Kriging sometimes useful for big gaps in an effort to preserve PSD)
-- re-evaluate the xy pixel intervals — the images seem way too big for the units (~50 um lines are like 5 um)
-- subtract DC before form?  Should I consider the first big jump in the heights histogram to be the DC offset?
+- status bar and time report
+- flag to separate result into individual windows
+- ability to draw line through the image to pull out a cross section (dealing with aliasing?)
 - additional figures
-  - 3D zoomed in on a single line trough pair
+  - 3D zoomed in on a single line through pair
   - roughness cross-section taken along the center of a scan line and the center of a trough
     - perhaps also averaging a few orthogonal peak-to-valley lines
   - export roughness to something blender compatible (obj? glb?)
