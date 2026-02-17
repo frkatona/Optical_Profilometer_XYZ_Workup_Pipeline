@@ -21,8 +21,6 @@ It is meant to be run from the command line with various flags to control the an
 
 ---
 
----
-
 ## **The Pipeline**
 
 ### 1. **NaN Interpolation**
@@ -60,7 +58,7 @@ if len(y_nan) > 0 and len(y_valid) > 0:
     result[nan_mask] = z_interp
 ```
 
-Laplacian and Kriging methods are available via the `-i` flag, though bilinear is the default and seems generally preferable for both speed and robustness (see the included [Interpolation Method Comparison](#gaussian-random) image)
+Laplacian and Kriging methods are available via the `-i` flag, though bilinear is the default and seems generally preferable for both speed and robustness (see the included [Interpolation Method Comparison](#gaussian-random) images for thorough testing)
 
 
 ### 2. **Surface Decomposition**
@@ -327,11 +325,11 @@ Alternative (unimplemented) similar methods to consider in the future include:
 
 #### 4.6. Local Roughness Map
 
-Viewing roughness across a window size can magnify feature scales of interest.
+Local roughness maps can magnify feature scales of interest. Maybe try window sizes >> roughness wavelength but << pattern wavelength
 
-![alt text](exports/analysis_images/LocalRMSRoughness.jpg)
+![local RMS map](exports/analysis_images/LocalRMSRoughness.jpg)
 
-The local roughness map implemented here chose an adaptive window size of data_size/32, .
+The local roughness map implemented here chose an adaptive window size of data_size/32
 
 ```python
 from scipy.ndimage import generic_filter
@@ -346,21 +344,19 @@ local_roughness = generic_filter(roughness, local_rms,
 ax.imshow(local_roughness, cmap='plasma')
 ```
 
-**Design Choice:** RMS in sliding window, window size = data_size/32  
-**Alternatives:**
 - **Fixed window size:** Use known feature size (e.g., 100µm for laser spacing)
 - **Ra instead of RMS:** Less sensitive to outliers
 - **Percentile-based:** Use 95th percentile for peak roughness mapping
 
-**Sample Knowledge:**  
-- If laser power varies across scan, expect roughness gradient
-- If edge effects occur, roughness increases near boundaries
-- For multi-pass scanning, overlap regions may show different roughness
-- Window size should be >> roughness wavelength but << pattern wavelength
-
 #### 4.7. Slope Distribution
 
-**Purpose:** Histogram of surface gradients indicates steepness distribution, important for optical/fluid contact properties.
+Histogram of surface gradients indicates steepness distribution, which can be relevant to optical and fluid contact properties.
+
+Mean gradient indicates average steepness, which relates to light scattering behavior.   Rayleigh distribution suggests random Gaussian surface.  If laser creates sharp edges, expect heavy tail (high gradients).  Steep slopes also inhibit attachment (e.g., cell adhesion studies, possibly fouling related?)
+
+![slope distribution](exports/analysis_images/SlopeDistribution.png)
+
+This implementation uses an L2 norm (magnitude) and is normalized by pixel spacing:
 
 ```python
 gy, gx = np.gradient(np.nan_to_num(data, nan=0))
@@ -371,23 +367,13 @@ ax.axvline(np.mean(valid_gradients), color='black', linestyle='--',
            label=f'Mean: {np.mean(valid_gradients):.3f}')
 ```
 
-**Design Choice:** L2 norm (magnitude), normalized by pixel spacing  
-**Alternatives:**
-- **Separate x/y components:** Reveals directional bias in slopes
-- **Log scale:** Better visualization if distribution spans decades
-- **Angular units:** Convert to degrees (arctan) for intuitive interpretation
+I could also try separating the x and y components to search for directional bias in slopes (similar to directional anisotropy graph).  A log scale may be worth checking out too.
 
-**Sample Knowledge:**  
-- Mean gradient indicates average steepness (affects light scattering)
-- Rayleigh distribution suggests random Gaussian surface
-- If laser creates sharp edges, expect heavy tail (high gradients)
-- For biological cell adhesion studies, steep slopes (>0.5) may inhibit attachment
+#### 4.8. Height-Gradient Hexbin Correlation
 
-#### 4.8. Height-Gradient Correlation
+Probably no good reason for a [hexbin](https://medium.com/@mattheweparker/visualizing-data-with-hexbins-in-python-39823f89525e) to be in here but I've gone and spaghetti'd up the figure generator so bad that it bugs out when I remove it
 
-**Purpose:** Hexbin scatter plot reveals whether tall/short regions are systematically steeper or flatter.
-
-![alt text](exports/analysis_images/HeightGradient.jpg)
+![height gradient hexbin](exports/analysis_images/HeightGradient.jpg)
 
 ```python
 valid_height = data[~np.isnan(data) & ~np.isnan(gradient_mag)]
@@ -402,49 +388,30 @@ ax.hexbin(valid_height, valid_grad, gridsize=30, cmap='YlOrRd')
 corr = np.corrcoef(valid_height, valid_grad)[0, 1]
 ax.text(0.05, 0.95, f'ρ = {corr:.3f}', ...)
 ```
+#### 4.9. Curvature Map
 
-**Design Choice:** Hexbin (2D histogram), sample to 10k points  
-**Alternatives:**
-- **Scatter plot with alpha:** Shows all points but slower
-- **2D Gaussian fit:** Quantify correlation ellipse
-- **Conditional statistics:** Plot mean gradient vs height bins
+Curvature can be used to identify regions of stress concentration (fracture initiation sites).  These maps can also behelpful in identifying features for targeted microscopy follow-up (SEM, AFM)
 
-**Sample Knowledge:**  
-- Positive correlation: peaks are steeper (volcano-like features)
-- Negative correlation: valleys are steeper (trenches)
-- Zero correlation: gradient independent of height (ideal for many processes)
-- For laser-ablated ceramics, positive correlation suggests material removal creates craters
+![mean curvature](exports/analysis_images/MeanCurvature.png)
 
-#### 4.9. Waviness Amplitude & Curvature Maps
+Positive curvature = peaks/bumps, negative = valleys/dips
 
-**Waviness Amplitude:**
-```python
-waviness_amp = np.abs(waviness)
-ax.imshow(waviness_amp, cmap='viridis')
-```
-Shows where medium-scale features (laser scan lines) have largest amplitude. Useful for identifying scan pattern geometry.
+Curvature is determined here through a Laplacian:
 
-**Curvature (Laplacian):**
 ```python
 from scipy.ndimage import laplace
 curvature = laplace(data) / (pixel_spacing_um**2)
 ax.imshow(curvature, cmap='RdBu_r', vmin=-3*std, vmax=3*std)
 ```
 
-**Design Choice:** Mean curvature via Laplacian operator  
-**Alternatives:**
-- **Gaussian curvature:** Product of principal curvatures (detects saddle points)
-- **Principal curvatures:** Eigenvalues of Hessian matrix (shows max/min curvature)
-- **Bilateral filtering:** Smooth before computing curvature to reduce noise
-
-**Sample Knowledge:**  
-- High curvature regions are stress concentrators (fracture initiation sites)
-- Positive curvature = peaks/bumps, negative = valleys/dips
-- For laser-ceramicized samples, scan line edges show high curvature
-- Curvature maps help identify features for targeted AFM follow-up
+Possible alternatives with similar utility may include Gaussian curvature (the product of principal curvatures for the detection of saddle points) and  principal curvatures (Eigenvalues of Hessian matrix to show max/min curvature)
 
 ### 5. **Export to Blender**
-Optionally export roughness map as OBJ file for 3D visualization in Blender
+Optionally export roughness map as OBJ file for import and rendering in Blender 3D
+
+![blender screenshot](exports/analysis_images/BlenderScreenshot.png)
+
+---
 
 ## Command-Line Options
 
@@ -472,6 +439,7 @@ optional arguments:
   --stats-only          Only compute and print statistics, skip visualization
   --bounds X1 X2 Y1 Y2  Crop image bounds in microns (x1 x2 y1 y2)
 ```
+*(Pixel spacing is automatically extracted from .xyz header metadata after the 2026-02-17 push)*
 
 ## Example Usage
 
@@ -479,24 +447,18 @@ optional arguments:
 # Full resolution analysis, default to bilinear inerpolation
 py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz
 
-# Kriging interpolation, 4x downsampling
-py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz -r 4 -i kriging
+# Save cropped, kriging-interpolated vis/stats to 'results' folder
+py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz -r 4 -i kriging -o --bounds 100 400 200 500 results/
 
-# Save visualizations and statistics to 'results' folder
-py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear -o results/
-
-# Just compute and print statistics
-py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz -r 4 --stats-only
-
-# Export roughness map as OBJ file for 3D visualization in Blender
-py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz -r 4 -i bilinear --export-obj -o results/
-
-# Crop to a specific region (from 100 to 400 microns in x, 200 to 500 microns in y)
-py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz --bounds 100 400 200 500
+# Export roughness map as OBJ file (for 3D visualization in Blender or elsewhere)
+py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz --export-obj -o results/
 
 # Windows PowerShell Batch Processing
 Get-ChildItem heightmaps\*.xyz | ForEach-Object { py analyze_profilometry.py $_.FullName -r 4 -i bilinear -o results/ --no-display }
 ```
+
+---
+
 ## Data Format
 
 The XYZ files have the following structure:
@@ -507,61 +469,10 @@ The XYZ files have the following structure:
   - Z: Height value
     - it is not yet totally clear as of this commit (2/10/26) if these values are in um or if the header contains the scalar from meters which would differe by a factor of ~5
 
-## Downsampling and other performance flags
-
-- Use `-r 4` or `-r 8` for initial exploration (much faster)
-- Use `-r 1` (full resolution) only when you need detailed analysis
-- Use `--stats-only` if you only need numerical statistics
-- Use `-o` with `--no-display` for batch processing without GUI
-- Bilinear interpolation is fastest; kriging is slowest but smoothest
-- Pixel spacing is automatically extracted from file header
 
 ---
 
-# interpolation methods exploration
-
-## gaussian random
-
-![alt text](exports/interpolation-methods/comparison_gaussian_random.png)
-
-## gaussian scratch
-
-![alt text](exports/interpolation-methods/comparison_gaussian_scratch.png)
-
----
-
-## poisson random
-
-![alt text](exports/interpolation-methods/comparison_poisson_random.png)
-
-## poisson scratch
-
-![alt text](exports/interpolation-methods/comparison_poisson_scratch.png)
-
----
-
-## speckle random
-
-![alt text](exports/interpolation-methods/comparison_speckle_random.png)
-
-## speckle scratch
-
-![alt text](exports/interpolation-methods/comparison_speckle_scratch.png)
-
----
-
-## Notes
-
-- Interpolation fills NaN values *before* surface decomposition and visualization
-- Statistics should be computed only on valid (non-NaN) data points (**double check this is accurate**)
-- Pixel spacing and vertical scale factor extracted from header line 8 (**still figuring out if this is correct**)
-- A pixel size of ~0.5 um puts the Nyquist resolution at ~1 um.  
-- Surface decomposition:
-  - **form:** 2nd order polynomial
-  - **waviness:** Gaussian filter with 0.8mm cutoff (after subtracting form)
-  - **roughness:** Residual (after removing form and waviness)
-
-# Current Data
+# PCD images (week of 2026-02-09)
 
 ## Standard - 100 um scan interval (1)
 
@@ -577,17 +488,17 @@ The XYZ files have the following structure:
 
 ---
 
-## ? (1)
+## PCD_01mminter_2.75x_05x (1)
 
-(placeholder)
+![alt text](exports/analysis_images/PCD_01mminter_2.75x_05x_001.png)
 
-## ? (2)
+## PCD_01mminter_2.75x_05x (2)
 
-(placeholder)
+![alt text](exports/analysis_images/PCD_01mminter_2.75x_05x_002.png)
 
-## ? (3)
+## PCD_01mminter_2.75x_05x (3)
 
-(placeholder)
+![alt text](exports/analysis_images/PCD_01mminter_2.75x_05x_003.png)
 
 ---
 
@@ -597,67 +508,119 @@ The XYZ files have the following structure:
 
 ## Cross-hatch (2)
 
-(placeholder)
+![alt text](exports/analysis_images/PCD_01mmcrosshatch_2.75x_05x_002.png)
 
 ## Cross-hatch (3)
 
-(placeholder)
+![alt text](exports/analysis_images/PCD_01mmcrosshatch_2.75x_05x_003.png)
 
 ---
 
 ## 2x line density (1)
 
-(placeholder)
+![alt text](exports/analysis_images/PCD_005mm_2.75x_05x_001.png)
 
 ## 2x line density (2)
 
-(placeholder)
+![alt text](exports/analysis_images/PCD_005mm_2.75x_05x_002.png)
 
 ## 2x line density (3)
 
-(placeholder)
+![alt text](exports/analysis_images/PCD_005mm_2.75x_05x_003.png)
 
 ---
 
-# Other notes
+---
 
-## Noise floor
+# Synthetic Interpolation Study
 
-If I'm interpreting the header info correctly (it's unlabeled, so maybe not), the instrument has a noise floor of a few microns, which sets the limit on measurable surface features.  Ra/Rq values should be compared to noise floor for if this is true.
+The script `interpolation_study.py` provides a framework for validating interpolation strategies on synthetic 128x128 surfaces. It simulates realistic profilometry artifacts including stepped geometries and various noise distributions.
+
+## Interpolation Methods & Formulae
+
+### 1. Nearest Neighbor
+Assigns the value of the visually closest data point.
+$$f(x, y) = f(x_i, y_i) \quad \text{where} \quad \sqrt{(x-x_i)^2 + (y-y_i)^2} \text{ is minimized}$$
+
+### 2. Bilinear Interpolation
+A linear extension of 1D interpolation, estimating the value based on the four nearest neighbors.
+$$f(x, y) \approx a_0 + a_1 x + a_2 y + a_3 xy$$
+
+### 3. Bicubic Interpolation
+Uses a third-degree polynomial (cubic spline) for smoother transitions, utilizing a $4 \times 4$ neighborhood.
+$$f(x, y) = \sum_{i=0}^3 \sum_{j=0}^3 a_{ij} x^i y^j$$
+
+### 4. Laplacian Diffusion
+Solves the steady-state diffusion (Laplace) equation to fill holes, ensuring a "smooth" harmonic transition.
+$$\nabla^2 f = \frac{\partial^2 f}{\partial x^2} + \frac{\partial^2 f}{\partial y^2} = 0$$
+
+### 5. Kriging / RBF (Radial Basis Function)
+Computes a weighted sum of basis functions centered at valid data points. The script defaults to the **Thin Plate Spline** kernel.
+$$f(\mathbf{x}) = \sum_{i=1}^n w_i \phi(\|\mathbf{x} - \mathbf{x}_i\|) + P(\mathbf{x})$$
+Where the Thin Plate Spline kernel is defined as:
+$$\phi(r) = r^2 \ln(r)$$
+
+## Features
+- **Noise Models**: Gaussian (Additive), Poisson (Shot), and Speckle (Multiplicative).
+- **Visualization**: Generates `comparison_<noise>_<mask_type>.png` plots showing Ground Truth, Masked Input, Reconstructions, and Difference Maps ($|Original - Reconstructed|$).
+
+## Usage
+```bash
+py interpolation_study.py
+```
+
+---
+
+# interpolation methods exploration
+
+## gaussian random
+
+![alt text](exports/interpolation-methods-study/comparison_gaussian_random.png)
+
+## gaussian scratch
+
+![alt text](exports/interpolation-methods-study/comparison_gaussian_scratch.png)
+
+---
+
+## poisson random
+
+![alt text](exports/interpolation-methods-study/comparison_poisson_random.png)
+
+## poisson scratch
+
+![alt text](exports/interpolation-methods-study/comparison_poisson_scratch.png)
+
+---
+
+## speckle random
+
+![alt text](exports/interpolation-methods-study/comparison_speckle_random.png)
+
+## speckle scratch
+
+![alt text](exports/interpolation-methods-study/comparison_speckle_scratch.png)
+
+---
 
 ## To-do
-- status bar and time report
-- flag to separate result into individual windows
-- ability to draw line through the image to pull out a cross section (dealing with aliasing?)
-- additional figures
-  - 3D zoomed in on a single line through pair
-  - roughness cross-section taken along the center of a scan line and the center of a trough
-    - perhaps also averaging a few orthogonal peak-to-valley lines
-  - export roughness to something blender compatible (obj? glb?)
-- find literature and think on how substantial these surface gradients are (probably most reflective of the "sharp cutoff" of interest)
-- find more reliable source for the metadata interpretation and let Jackie and Ben know if their z-scaling has been way off
+ - isolate sample in figures where background is present/NaN
+   - ability to draw line through the image to pull out a cross section (dealing with aliasing?)
+- there must be something brokenw ith the visualizations...that's where 90% of the pipeline computation is going
+- really scour ben's repo for pitfalls I've run into unwittingly
+- literature 
+   - get basic foundation into the literature folder
+   - find/think on how substantial these surface gradients are (probably most reflective of the "sharp cutoff" of interest)
+   - figure out where Ben found the Zygo manual and find what that other metadata header value means
+- Is that value from the header the noise floor?
 - accounting for and reporting high frequency regime pitfalls
   - the noise floor
   - sampling/Nyquist — aliasing near $f_{max} = 1/(2\Delta$)
   - instrument's transfer function (objective NA, coherence mode, lateral resolution chaning at high $f$)
 
-### spatial wavelength regimes considerations
-- currently just playing with upper and lower bounds for waviness
-- consider migrating paradigms
-- power spectral density (PSD)
-    - detrend/level (remove piston and tilt)
-    - window (Hann/Tukey) before FFT to reduce edge leakage
-    - compute 2D PSD then radially average to get 1D PSD vs f
-    - report band-limited RMS
-- band-limited metrics with band-pass filtering
-    - FFT + mask or spatial domain equivalents (Gaussian / spline / ISO filters)
-- Autocorrelation / structure function (correlation lengths and isotropy)
-- Wavelets / multiresolution decomposition
-- Directional / oriented analysis
+---
 
-## Journal References
-
-Foundational literature for each of the image analysis tools and techniques implemented in `analyze_profilometry.py`.
+## Some image analysis reading
 
 ### Surface Roughness Parameters (Ra, Rq, Rz)
 - **ISO 4287:1997** — *Geometrical Product Specifications (GPS) – Surface texture: Profile method – Terms, definitions and surface texture parameters.* Defines arithmetic mean roughness (Ra), RMS roughness (Rq), and maximum height (Rz).
@@ -702,10 +665,7 @@ Foundational literature for each of the image analysis tools and techniques impl
 
 ## Resources
 
-instrument
 - https://en.wikipedia.org/wiki/White_light_interferometry
-
-interpolation
 - https://en.wikipedia.org/wiki/Radial_basis_function_interpolation
 - https://en.wikipedia.org/wiki/Kriging
 
@@ -717,42 +677,3 @@ interpolation
 > Automated image stitching.
 > 200mm XY stage and 100mm Z clearance with capacity for up to 10lbs.
 > A white light interferometer is a type of profilometer in which light from a lamp is split into two paths by a beam splitter. One path directs the light onto the surface under test, the other path directs the light to a reference mirror. Reflections from the two surfaces are recombined and projected onto an array detector. When the path difference between the recombined beams is on the order of a few wavelengths of light or less, interference can occur. This interference contains information about the surface contours of the test surface. Vertical resolution can be on the order of several angstroms while lateral resolution depends upon the system and objective and is typically in the range of 0.26um – 4.4um.
-
----
-
-# Synthetic Interpolation Study
-
-The script `interpolation_study.py` provides a framework for validating interpolation strategies on synthetic 128x128 surfaces. It simulates realistic profilometry artifacts including stepped geometries and various noise distributions.
-
-## Interpolation Methods & Formulae
-
-### 1. Nearest Neighbor
-Assigns the value of the visually closest data point.
-$$f(x, y) = f(x_i, y_i) \quad \text{where} \quad \sqrt{(x-x_i)^2 + (y-y_i)^2} \text{ is minimized}$$
-
-### 2. Bilinear Interpolation
-A linear extension of 1D interpolation, estimating the value based on the four nearest neighbors.
-$$f(x, y) \approx a_0 + a_1 x + a_2 y + a_3 xy$$
-
-### 3. Bicubic Interpolation
-Uses a third-degree polynomial (cubic spline) for smoother transitions, utilizing a $4 \times 4$ neighborhood.
-$$f(x, y) = \sum_{i=0}^3 \sum_{j=0}^3 a_{ij} x^i y^j$$
-
-### 4. Laplacian Diffusion
-Solves the steady-state diffusion (Laplace) equation to fill holes, ensuring a "smooth" harmonic transition.
-$$\nabla^2 f = \frac{\partial^2 f}{\partial x^2} + \frac{\partial^2 f}{\partial y^2} = 0$$
-
-### 5. Kriging / RBF (Radial Basis Function)
-Computes a weighted sum of basis functions centered at valid data points. The script defaults to the **Thin Plate Spline** kernel.
-$$f(\mathbf{x}) = \sum_{i=1}^n w_i \phi(\|\mathbf{x} - \mathbf{x}_i\|) + P(\mathbf{x})$$
-Where the Thin Plate Spline kernel is defined as:
-$$\phi(r) = r^2 \ln(r)$$
-
-## Features
-- **Noise Models**: Gaussian (Additive), Poisson (Shot), and Speckle (Multiplicative).
-- **Visualization**: Generates `comparison_<noise>_<mask_type>.png` plots showing Ground Truth, Masked Input, Reconstructions, and Difference Maps ($|Original - Reconstructed|$).
-
-## Usage
-```bash
-py interpolation_study.py
-```
