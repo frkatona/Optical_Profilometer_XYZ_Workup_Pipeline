@@ -537,7 +537,7 @@ The XYZ files have the following structure:
 
 The script `interpolation_study.py` provides a framework for validating interpolation strategies on synthetic 128x128 surfaces. It aims to replicate the kinds of artifacts and features expected in our PCD profilometry imaging, including stepped geometries and various distributions of noise for simulated data loss.
 
-## Interpolation Methods & Formulae
+# interpolation methods exploration
 
 ### 1. Nearest Neighbor
 Assigns the value of the visually closest data point.
@@ -566,8 +566,6 @@ $$\phi(r) = r^2 \ln(r)$$
 - **Visualization**: Generates `comparison_<noise>_<mask_type>.png` plots showing Ground Truth, Masked Input, Reconstructions, and Difference Maps ($|Original - Reconstructed|$).
 
 ---
-
-# interpolation methods exploration
 
 ## gaussian random
 

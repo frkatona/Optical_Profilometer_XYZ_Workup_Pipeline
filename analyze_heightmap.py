@@ -1,8 +1,5 @@
 """
 Optical Profilometry Data Analysis and Visualization Script
-
-This script processes and visualizes XYZ optical profilometry data files
-containing 1024x1024 height measurements with a 14-line header.
 """
 
 import numpy as np
@@ -65,16 +62,16 @@ def load_xyz_file(filepath, resolution_factor=1):
     try:
         parts = header_lines[7].split()
         if len(parts) >= 8:
-            # Value 7: True lateral sampling (um per pixel)
+            # Value 7: Lateral sampling (um per pixel) (from Ben's repo, supposedly from the Zygo manual)
             pixel_spacing_um = float(parts[6])*(10**6)
             
-            # Value 4: Wavelength/modulation parameter
+            # Value 4: Wavelength/modulation parameter (maybe?)
             wavelength = float(parts[3])
             
-            # Value 5: Coherence flag
+            # Value 5: Coherence flag (maybe?)
             coherence_flag = int(parts[4])
             
-            # Value 8: Unix timestamp
+            # Value 8: Unix timestamp (checks out)
             timestamp = int(parts[7])
         else:
             raise ValueError(f"Insufficient values in header line 8: {len(parts)} < 8")
@@ -118,9 +115,10 @@ def load_xyz_file(filepath, resolution_factor=1):
                 except (ValueError, IndexError):
                     continue
     
-    # Downsample if requested
+    # Downsampling
     if resolution_factor > 1:
         # Use mean pooling for downsampling (ignoring NaN values)
+        # maybe evaluate if interpolation is the real bottleneck, because it'd be great to not have to mean pool
         new_height = height // resolution_factor
         new_width = width // resolution_factor
         data = np.full((new_height, new_width), np.nan)
@@ -293,8 +291,8 @@ def interpolate_nans(data, method='bilinear'):
             result[nan_mask] = z_interp
     
     elif method == 'laplacian':
-        # Iterative Laplacian interpolation (solves Laplace equation)
-        # This naturally handles edges well
+        # Iterative Laplacian interpolation
+        # (should handle edges better)
         max_iterations = 1000
         tolerance = 1e-6
         
@@ -325,7 +323,7 @@ def interpolate_nans(data, method='bilinear'):
     
     elif method == 'kriging':
         # Use RBF (Radial Basis Function) interpolation as a kriging approximation
-        # This is computationally expensive but handles edges well
+        # (computationally expensive)
         valid_mask = ~nan_mask
         y_valid, x_valid = np.where(valid_mask)
         z_valid = data[valid_mask]
