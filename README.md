@@ -154,9 +154,11 @@ Removing the low-frequency regimes effectively high-pass filters the surface, le
  - normalized roughness (relative to waviness amplitude) where it scales with local geometry (e.g., rougher in the valleys vs the peaks)
 
 ### 3. **Downsampling**
-All stages of the pipeline can be dramatically accelerated with smaller data to sample from, with full sampling taking sometimes more than 10 min between raw file processing and rendering. The downsampling CLI flag `-r` can be used to reduce effective resolution for faster processing at scales of powers of 2 (2x, 4x, 8x, 16x, 32x).  Also optionally skip the visualizer rendering with the `-v` flag.
+All stages of the pipeline can be accelerated with smaller data to sample from. The downsampling CLI flag `-r` can be used to reduce effective resolution at scales of powers of 2 (2x, 4x, 8x, 16x, 32x).  Also optionally skip the visualizer rendering with the `-v` flag.
 
 Do note that this implementation 'mean pools' (averages) rather than 'decimates' (excludes) data, which has meaningful consequences for calculations of coverage and roughness, particularly in regions with higher NaN content.  As such, try to use the full resolution when drawing conclusions from the data which rely on the authenticity of high frequency features or when the reported NaN content is particularly high.
+
+*NOTE: the efficiency of the script has been dramatically improved (average runtime for me is down ~10 min -> ~10 s), all but removing the necessity of this feature.  But I will leave it in case it helps with a hardware limitation or there's interest in comparing downsampled data*
 
 ### 4. **Statistical Analysis**
 
