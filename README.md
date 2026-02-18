@@ -64,7 +64,7 @@ if len(y_nan) > 0 and len(y_valid) > 0:
 
 Laplacian and Kriging methods are available via the `-i` flag, though bilinear is the default and seems generally preferable for both speed and robustness (see the included [Interpolation Method Comparison](#gaussian-random) images for thorough testing)
 
-*NOTE: some images have such wide zones of missing data that interpolation will produce artifacts large enough to meaningfully skew statistical analyses.  When these zones appear along image edges, it is suggested to use the image cropping flag to trim dead zones as much as possible (see [CLI flags](#command-line-options))*
+*NOTE: some images have such wide zones of missing data that interpolation will produce artifacts large enough to meaningfully skew statistical analyses.  When these zones appear along image edges, it is suggested to use the image cropping flag to crop out dead zones as much as possible (see [CLI flags](#command-line-options))*
 
 
 ### 2. **Surface Decomposition**
