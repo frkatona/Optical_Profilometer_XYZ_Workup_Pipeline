@@ -33,6 +33,8 @@ Optical profilometery can be error-prone when sample features (steepness, roughn
 
 **Bilinear** 2D linear interpolation is the default method.  For extrapolation (at the edges of the dataset), it uses nearest neighbor interpolation.
 
+*note that the [scipy.griddata](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.griddata.html) function is not bilinear, per se. Instead it tessellates the space and performs linear interpolation within each triangle*
+
 ```py
 # Get coordinates of valid points
 valid_mask = ~nan_mask
