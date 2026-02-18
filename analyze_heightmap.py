@@ -708,9 +708,14 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     
     # 9. Autocorrelation Function
     ax9 = plt.subplot(4, 5, 9)
-    from scipy.signal import correlate2d
     data_centered = data_filled - np.nanmean(data_filled)
-    autocorr = correlate2d(data_centered, data_centered, mode='same')
+    # SLOW: direct O(N^4) convolution - takes ~10+ min on large arrays
+    # from scipy.signal import correlate2d
+    # autocorr = correlate2d(data_centered, data_centered, mode='same')
+    # FFT-based autocorrelation: O(N^2 log N), orders of magnitude faster
+    fft_ac = np.fft.fft2(data_centered)
+    autocorr = np.fft.ifft2(np.abs(fft_ac)**2).real
+    autocorr = np.fft.fftshift(autocorr)
     autocorr /= autocorr[cy, cx]  # Normalize
     
     # Plot central slice
@@ -786,14 +791,19 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     
     # 15. Local Roughness Map (RMS in sliding window)
     ax15 = plt.subplot(4, 5, 15)
-    from scipy.ndimage import generic_filter
-    
-    def local_rms(values):
-        return np.sqrt(np.nanmean(values**2))
     
     # Use smaller window for local analysis
     window_size = max(5, data.shape[0] // 32)
-    local_roughness = generic_filter(roughness, local_rms, size=window_size, mode='constant', cval=np.nan)
+    # SLOW: generic_filter calls Python function once per pixel (~1-5 min)
+    # from scipy.ndimage import generic_filter
+    # def local_rms(values):
+    #     return np.sqrt(np.nanmean(values**2))
+    # local_roughness = generic_filter(roughness, local_rms, size=window_size, mode='constant', cval=np.nan)
+    # Vectorized equivalent: sqrt(E[x^2]) via uniform_filter on squared values
+    from scipy.ndimage import uniform_filter
+    roughness_filled = np.where(np.isnan(roughness), 0.0, roughness)
+    local_roughness = np.sqrt(uniform_filter(roughness_filled**2, size=window_size))
+    local_roughness[np.isnan(roughness)] = np.nan
     
     im15 = ax15.imshow(local_roughness, cmap='plasma', origin='lower', interpolation='nearest',
                        extent=extent_mm)

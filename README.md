@@ -261,17 +261,14 @@ Auto-correlation functions (ACF) measure correlation between a set of data and a
 The ACF implemented here was normalized at zero lag and plotted as a 1D slice:
 
 ```python
-from scipy.signal import correlate2d
-
-data_centered = data_filled - np.nanmean(data_filled)
-autocorr = correlate2d(data_centered, data_centered, mode='same')
-autocorr /= autocorr[cy, cx]  # Normalize to 1 at zero lag
+fft_ac = np.fft.fft2(data_centered)
+autocorr = np.fft.ifft2(np.abs(fft_ac)**2).real
+autocorr = np.fft.fftshift(autocorr)
+autocorr /= autocorr[cy, cx]  # Normalize
 
 # Plot central slice
 autocorr_slice = autocorr[cy, cx:]
 lag_um = np.arange(len(autocorr_slice)) * pixel_spacing_um
-ax.plot(lag_um, autocorr_slice)
-ax.axhline(np.exp(-1), color='red', label='e⁻¹')  # Correlation length marker
 ```
 
 Alternative (unimplemented) similar methods to consider in the future include:
@@ -279,6 +276,8 @@ Alternative (unimplemented) similar methods to consider in the future include:
 - **2D autocorrelation heatmap:** Reveals anisotropic correlation (elliptical vs circular)
 - **Fit exponential decay:** Extract correlation length quantitatively
 - **Structure function:** Sometimes preferred for fractal surfaces
+
+*Note that the original implementation used a convolution method (scipy.signal.correlate2D) which operates at $O(N^4)$ (1000x1000 pixel image -> 10^12 operations).  The FFT switch is $O(N^2 log N)$, which shaved about 10 minutes off my run time and produced results which did not seem substantially different to my eye.  I'll leave the convolution method commented in the script*
 
 #### 4.4. Bearing Ratio (Abbott-Firestone Curve)
 
@@ -336,21 +335,18 @@ Local roughness maps can magnify feature scales of interest. Maybe try window si
 The local roughness map implemented here chose an adaptive window size of data_size/32
 
 ```python
-from scipy.ndimage import generic_filter
+from scipy.ndimage import uniform_filter
 
-def local_rms(values):
-    return np.sqrt(np.nanmean(values**2))
-
-window_size = max(5, data.shape[0] // 32)  # Adaptive window
-local_roughness = generic_filter(roughness, local_rms, 
-                                  size=window_size, mode='constant')
-
-ax.imshow(local_roughness, cmap='plasma')
+roughness_filled = np.where(np.isnan(roughness), 0.0, roughness)
+local_roughness = np.sqrt(uniform_filter(roughness_filled**2, size=window_size))
+local_roughness[np.isnan(roughness)] = np.nan
 ```
 
 - **Fixed window size:** Use known feature size (e.g., 100µm for laser spacing)
 - **Ra instead of RMS:** Less sensitive to outliers
 - **Percentile-based:** Use 95th percentile for peak roughness mapping
+
+*note that the original implementation used a scipy.ndimage.generic_filter which was somewhat slow, and so it was replaced with the vectorized equivalent, scipy.ndimage.uniform filter.  The original version is left commented in the code*
 
 #### 4.7. Slope Distribution
 
@@ -445,7 +441,7 @@ optional arguments:
 ```
 *(Pixel spacing is automatically extracted from .xyz header metadata after the 2026-02-17 push)*
 
-## Example Usage
+## Example Usages
 
 ```bash
 # Full resolution analysis, default to bilinear inerpolation
@@ -460,18 +456,6 @@ py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz --export-obj -o
 # Windows PowerShell Batch Processing
 Get-ChildItem heightmaps\*.xyz | ForEach-Object { py analyze_profilometry.py $_.FullName -r 4 -i bilinear -o results/ --no-display }
 ```
-
----
-
-## Data Format
-
-The XYZ files have the following structure:
-- **Header**: 14 lines of metadata
-- **Data**: Lines with format `X Y Z`, where some Z are NaN
-  - X, Y: Integer coordinates (0-1023)
-    - it is not clear as of this commit (2/10/26) how to translate this into physical distance.  The values that result from the header scalar do not match intuition (the line spacing should be ~100 microns)
-  - Z: Height value
-    - it is not yet totally clear as of this commit (2/10/26) if these values are in um or if the header contains the scalar from meters which would differe by a factor of ~5
 
 ---
 
@@ -571,31 +555,31 @@ $$\phi(r) = r^2 \ln(r)$$
 
 ## gaussian random
 
-![alt text](exports/interpolation-methods-study/comparison_gaussian_random.png)
+![gaussian random](exports/interpolation-methods-study/comparison_gaussian_random.png)
 
 ## gaussian scratch
 
-![alt text](exports/interpolation-methods-study/comparison_gaussian_scratch.png)
+![gaussian scratch](exports/interpolation-methods-study/comparison_gaussian_scratch.png)
 
 ---
 
 ## poisson random
 
-![alt text](exports/interpolation-methods-study/comparison_poisson_random.png)
+![poisson random](exports/interpolation-methods-study/comparison_poisson_random.png)
 
 ## poisson scratch
 
-![alt text](exports/interpolation-methods-study/comparison_poisson_scratch.png)
+![poisson scratch](exports/interpolation-methods-study/comparison_poisson_scratch.png)
 
 ---
 
 ## speckle random
 
-![alt text](exports/interpolation-methods-study/comparison_speckle_random.png)
+![speckle random](exports/interpolation-methods-study/comparison_speckle_random.png)
 
 ## speckle scratch
 
-![alt text](exports/interpolation-methods-study/comparison_speckle_scratch.png)
+![speckle scratch](exports/interpolation-methods-study/comparison_speckle_scratch.png)
 
 ---
 
@@ -613,6 +597,8 @@ $$\phi(r) = r^2 \ln(r)$$
   - the noise floor
   - sampling/Nyquist — aliasing near $f_{max} = 1/(2\Delta$)
   - instrument's transfer function (objective NA, coherence mode, lateral resolution chaning at high $f$)
+- re-use the FFT rather than re-calculating it each time
+- try another interpolation study with a sample with less stepped variations (smoother corners) and mask specifically at the valleys to more properly model the noise from the lased samples
 
 ## Discussion
 - unless I'm missing something, it seems like the sample thickness must be both much greater than reported previously.  Precise thickness determinations are difficult because I can't find any good images where we can see the substrate, but even just the waviness variations span more than 10 um of height
