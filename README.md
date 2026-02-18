@@ -115,7 +115,7 @@ if len(z_flat) > 6:
 A 2nd-order polynomial fit was chosen arbitrarily, though substantial 2nd-order form seems common in the samples analyzed so far
 
 
-A 1st-order fit (for removing pure 'tilt' and 'piston' planar orientations) would be simpler, but would neglect broad curvature of the sample surface
+A 1st-order fit (for removing pure 'tilt' and 'piston' planar orientations) would be simpler, but would neglect broad curvature of the sample surface which may reveal, for instance, a radial thickness falloff suggesting insufficient spreading from the coating method.
 
 3rd-order (or higher) functions and splines can model complex curvatures and distortions (thermal warping?), but I don't fully understand their utility here and did not want to risk over-fitting
 
@@ -285,7 +285,7 @@ Alternative (unimplemented) similar methods to consider in the future include:
 
 #### 4.4. Bearing Ratio (Abbott-Firestone Curve)
 
-The Abbot-Firestone curve is another way of illustrating the height distribution. It shows what fraction of surface area lies above any given height threshold. Supposedly, it is sometimes preferred over (alongside?) the histogram in engineering contexts where its features help highlight texture, wear, and lubrication retention.
+The Abbot-Firestone curve is another way of illustrating the height distribution, as a cumulative PDF. It shows the fraction of surface area that lies above any given height threshold. Supposedly, it is sometimes preferred over (alongside?) the histogram in engineering contexts where its features help highlight texture, wear, and lubrication retention.
 
 ![alt text](exports/analysis_images/Abbot-Firestone.jpg)
 
@@ -595,6 +595,7 @@ $$\phi(r) = r^2 \ln(r)$$
    - get basic foundation into the literature folder
    - find/think on how substantial these surface gradients are (probably most reflective of the "sharp cutoff" of interest)
    - figure out where Ben found the Zygo manual and find what that other metadata header value means
+- add a perpendicular orientation to the auto-correlation
 - Is that value from the header the noise floor?
 - accounting for and reporting high frequency regime pitfalls
   - the noise floor
@@ -603,66 +604,22 @@ $$\phi(r) = r^2 \ln(r)$$
 - re-use the FFT rather than re-calculating it each time
 - try another interpolation study with a sample with less stepped variations (smoother corners) and mask specifically at the valleys to more properly model the noise from the lased samples
 
-## Discussion
+## Discussion/Considerations
 - unless I'm missing something, it seems like the sample thickness must be both much greater than reported previously.  Precise thickness determinations are difficult because I can't find any good images where we can see the substrate, but even just the waviness variations span more than 10 um of height
    - how thin would it need to be to be visible?  
       - to interfere? could I angle it with the IR and see where interference arises?
    - are the substrates that far away (/the samples that thick?) what's the maximum vertical distance the profilometer can see?  Is it more likely the sapphire is scattering the light?  --> try again but with (1) thinnest emissive coating on hand and/or (2) spatula-smudged edge/bevel to create a clear ramp leading from ~peak to surface visible from above
+   - the 2001 Strawhecker paper has some insights on controlling roughness with solvent choice and evaporation rate.  I think Ben S has already touched on these ideas, but maybe worth sharing the paper with him just in case
+    - flow/evaporation instabilities -> Marangoni / Benard-Marangoni cells/striations must be arrested before the film can level (roughness tracks evaporation rate much more strongly than surface tension...for a given solvent, increases with film thickness and decreases with spin speed).  Perhaps it's worth trying to get smooth surfaces on well-understood polymer, like PMMA (can target even sub-nm roughness)
+    - substrate compatibility (good wetting, maybe priming/passivating its surface)
+    - filtered solution, solvent-rich atmosphere with controlled flow/outgas
+    - targeting sub-micron thicknesses?  (maybe the required >=10 um for our absorption is just inherently rough?)
 - Ben (Lear) code differences
   - manually fills NaN with a 3x3 average
   - decomposes to waviness + roughness with some kind of spline method
   - determines roughness from waviness + roughness composition rather than roughness
 
 ---
-
-## Some image analysis reading
-
-### Surface Roughness Parameters (Ra, Rq, Rz)
-- **ISO 4287:1997** — *Geometrical Product Specifications (GPS) – Surface texture: Profile method – Terms, definitions and surface texture parameters.* Defines arithmetic mean roughness (Ra), RMS roughness (Rq), and maximum height (Rz).
-- **ISO 25178-2:2012** — *Geometrical product specifications (GPS) – Surface texture: Areal – Part 2: Terms, definitions and surface texture parameters.* Extends profile roughness parameters (Ra, Rq) to areal (Sa, Sq) for 2D surface maps.
-
-### Surface Decomposition (Form / Waviness / Roughness)
-- **ISO 16610-21:2011** — *Geometrical product specifications (GPS) – Filtration – Part 21: Linear profile filters: Gaussian filters.* Defines the Gaussian filter for separating roughness from waviness (replaces ISO 11562).
-- **ISO 16610-61:2015** — *Geometrical product specifications (GPS) – Filtration – Part 61: Linear areal filters: Gaussian filters.* Areal (2D) Gaussian filter for surface texture decomposition.
-- Raja, J., Muralikrishnan, B., & Fu, S. (2002). "Recent advances in separation of roughness, waviness and form." *Precision Engineering*, 26(2), 222–235. doi:10.1016/S0141-6359(02)00103-X
-
-### Power Spectral Density (PSD)
-- Jacobs, T.D.B., Junge, T., & Pastewka, L. (2017). "Quantitative characterization of surface topography using spectral analysis." *Surface Topography: Metrology and Properties*, 5(1), 013001. doi:10.1088/2051-672X/aa51f8
-- Persson, B.N.J., Albohr, O., Tartaglino, U., Volokitin, A.I., & Tosatti, E. (2005). "On the nature of surface roughness with application to contact mechanics, sealing, rubber friction and adhesion." *Journal of Physics: Condensed Matter*, 17(1), R1–R62. doi:10.1088/0953-8984/17/1/R01
-
-### Autocorrelation Function & Correlation Length
-- Whitehouse, D.J. & Archard, J.F. (1970). "The properties of random surfaces of significance in their contact." *Proceedings of the Royal Society of London A*, 316(1524), 97–121. doi:10.1098/rspa.1970.0068
-- Thomas, T.R. (1999). *Rough Surfaces*, 2nd ed. Imperial College Press. (Comprehensive treatment of autocorrelation, structure functions, and spectral characterization of surfaces.)
-
-### Abbott-Firestone Curve (Bearing Ratio)
-- Abbott, E.J. & Firestone, F.A. (1933). "Specifying surface quality: A method based on accurate measurement and comparison." *Mechanical Engineering*, 55, 569–572.
-- **ISO 13565-2:1996** — *Geometrical Product Specifications (GPS) – Surface texture: Profile method – Surfaces having stratified functional properties – Part 2: Height characterization using the linear material ratio curve.* Standardizes the bearing ratio curve and derived parameters (Rk, Rpk, Rvk).
-
-### Surface Gradient & Slope Distribution
-- Gadelmawla, E.S., Koura, M.M., Maksoud, T.M.A., Elewa, I.M., & Soliman, H.H. (2002). "Roughness parameters." *Journal of Materials Processing Technology*, 123(1), 133–145. doi:10.1016/S0924-0136(02)00060-2
-- Nayak, P.R. (1971). "Random process model of rough surfaces." *Journal of Lubrication Technology*, 93(3), 398–407. doi:10.1115/1.3451608
-
-### Directional Analysis (Anisotropy)
-- Stout, K.J. et al. (1993). *The Development of Methods for the Characterisation of Roughness in Three Dimensions.* EUR 15178 EN, Commission of the European Communities.
-- **ISO 25178-2:2012**, §4.3 — Defines the texture direction parameter (Std) and texture aspect ratio (Str) for quantifying surface anisotropy.
-
-### Curvature Map (Laplacian)
-- Brown, C.A., Hansen, H.N., Jiang, X.J., Blateyron, F., Berglund, J., Senin, N., Bartkowiak, T., Dixon, B., Le Goïc, G., Quinsat, Y., & Stemp, W.J. (2018). "Multiscale analyses and characterizations of surface topographies." *CIRP Annals*, 67(2), 839–862. doi:10.1016/j.cirp.2018.06.001
-- Bartkowiak, T. & Brown, C.A. (2019). "Multiscale 3D curvature analysis of processed surface textures of aluminum alloy 6061 T6." *Materials*, 12(2), 257. doi:10.3390/ma12020257
-
-### Local Roughness Map (Sliding-Window RMS)
-- Jiang, X., Scott, P.J., Whitehouse, D.J., & Blunt, L. (2007). "Paradigm shifts in surface metrology. Part II. The current shift." *Proceedings of the Royal Society A*, 463(2085), 2071–2099. doi:10.1098/rspa.2007.1873
-
-### NaN Interpolation (Bilinear, Laplacian Diffusion, Kriging / RBF)
-- Duchon, J. (1977). "Splines minimizing rotation-invariant semi-norms in Sobolev spaces." In *Constructive Theory of Functions of Several Variables*, Lecture Notes in Mathematics, Vol. 571, 85–100. Springer-Verlag. (Foundational work on thin-plate splines used in RBF interpolation.)
-- Matheron, G. (1963). "Principles of geostatistics." *Economic Geology*, 58(8), 1246–1266. doi:10.2113/gsecongeo.58.8.1246 (Foundational kriging reference.)
-- Francisco, A., Brunetière, N., & Merceron, G. (2020). "Damaged digital surfaces also deserve realistic healing." *Surface Topography: Metrology and Properties*, 8(3), 035008. doi:10.1088/2051-672X/aba0da (Laplacian diffusion for surface reconstruction.)
-
-## More Resources
-
-- https://en.wikipedia.org/wiki/White_light_interferometry
-- https://en.wikipedia.org/wiki/Kriging
-- asdf
 
 ### MSC's Profilometer Description
 
@@ -672,3 +629,7 @@ $$\phi(r) = r^2 \ln(r)$$
 > Automated image stitching.
 > 200mm XY stage and 100mm Z clearance with capacity for up to 10lbs.
 > A white light interferometer is a type of profilometer in which light from a lamp is split into two paths by a beam splitter. One path directs the light onto the surface under test, the other path directs the light to a reference mirror. Reflections from the two surfaces are recombined and projected onto an array detector. When the path difference between the recombined beams is on the order of a few wavelengths of light or less, interference can occur. This interference contains information about the surface contours of the test surface. Vertical resolution can be on the order of several angstroms while lateral resolution depends upon the system and objective and is typically in the range of 0.26um – 4.4um.
+
+## Reading
+
+The literature folder contains a collection of papers and standards covering some of the analysis techniques for image processing, as well as possible considerations for polymer coating
