@@ -794,7 +794,6 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
     
     # Use smaller window for local analysis
     window_size = max(5, data.shape[0] // 32)
-    # SLOW: generic_filter calls Python function once per pixel (~1-5 min)
     # from scipy.ndimage import generic_filter
     # def local_rms(values):
     #     return np.sqrt(np.nanmean(values**2))
