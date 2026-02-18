@@ -64,6 +64,8 @@ if len(y_nan) > 0 and len(y_valid) > 0:
 
 Laplacian and Kriging methods are available via the `-i` flag, though bilinear is the default and seems generally preferable for both speed and robustness (see the included [Interpolation Method Comparison](#gaussian-random) images for thorough testing)
 
+*NOTE: some images have such wide zones of missing data that interpolation will produce artifacts large enough to meaningfully skew statistical analyses.  When these zones appear along image edges, it is suggested to use the image cropping flag to trim dead zones as much as possible (see [CLI flags](#command-line-options))*
+
 
 ### 2. **Surface Decomposition**
 
@@ -589,7 +591,6 @@ $$\phi(r) = r^2 \ln(r)$$
  - isolate sample in figures where background is present/NaN
    - ability to draw line through the image to pull out a cross section (dealing with aliasing?)
 - there must be something brokenw ith the visualizations...that's where 90% of the pipeline computation is going
-- really scour ben's repo for pitfalls I've run into unwittingly
 - literature 
    - get basic foundation into the literature folder
    - find/think on how substantial these surface gradients are (probably most reflective of the "sharp cutoff" of interest)
@@ -607,6 +608,10 @@ $$\phi(r) = r^2 \ln(r)$$
    - how thin would it need to be to be visible?  
       - to interfere? could I angle it with the IR and see where interference arises?
    - are the substrates that far away (/the samples that thick?) what's the maximum vertical distance the profilometer can see?  Is it more likely the sapphire is scattering the light?  --> try again but with (1) thinnest emissive coating on hand and/or (2) spatula-smudged edge/bevel to create a clear ramp leading from ~peak to surface visible from above
+- Ben (Lear) code differences
+  - manually fills NaN with a 3x3 average
+  - decomposes to waviness + roughness with some kind of spline method
+  - determines roughness from waviness + roughness composition rather than roughness
 
 ---
 
