@@ -491,15 +491,15 @@ Get-ChildItem heightmaps\*.xyz | ForEach-Object { py analyze_profilometry.py $_.
 
 ## Cross-hatch (1)
 
-![alt text](exports/analysis_images/PCD_01mmcrosshatch_2.75x_05x_001.png)
+![crosshatch crop 1](exports/analysis_images/crosshatch-crop-1.png)
 
 ## Cross-hatch (2)
 
-![alt text](exports/analysis_images/PCD_01mmcrosshatch_2.75x_05x_002.png)
+![crosshatch crop 2](exports/analysis_images/crosshatch-crop-2.png)
 
 ## Cross-hatch (3)
 
-![alt text](exports/analysis_images/PCD_01mmcrosshatch_2.75x_05x_003.png)
+![crosshatch crop 3](exports/analysis_images/crosshatch-crop-3.png)
 
 ---
 
@@ -651,11 +651,11 @@ $$\phi(r) = r^2 \ln(r)$$
 - Matheron, G. (1963). "Principles of geostatistics." *Economic Geology*, 58(8), 1246–1266. doi:10.2113/gsecongeo.58.8.1246 (Foundational kriging reference.)
 - Francisco, A., Brunetière, N., & Merceron, G. (2020). "Damaged digital surfaces also deserve realistic healing." *Surface Topography: Metrology and Properties*, 8(3), 035008. doi:10.1088/2051-672X/aba0da (Laplacian diffusion for surface reconstruction.)
 
-## Resources
+## More Resources
 
 - https://en.wikipedia.org/wiki/White_light_interferometry
-- https://en.wikipedia.org/wiki/Radial_basis_function_interpolation
 - https://en.wikipedia.org/wiki/Kriging
+- asdf
 
 ### MSC's Profilometer Description
 
