@@ -15,7 +15,7 @@ Continue reading for details or skip to the [PCD data analysis section](#PCD_ima
 ### 3D rendering
 
 <!-- ![alt text](exports/blender-renders/fresnel-render.png) -->
-exports/blender-renders/PCD_waviness-roughness_loop.gif
+![PCD-output](exports/blender-renders/PCD-output.gif)
 
 ---
 
