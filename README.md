@@ -4,7 +4,7 @@ This project contains a python pipeline for generating comprehensive analysis fr
 
 The pipeline interpolates missing data, decomposes the surface into frequency regimes, and generates various statistics and visualizations on the surface topography, from height maps and histograms to autocorrelation and gradient distribution.
 
-It is meant to be run from the command line with various flags to control the analysis, and can be used to generate a single analysis or batch process multiple files.
+It is meant to be run from the command line with various flags to control the analysis (`py analyze_heightmap.py --help`), and can be used to generate a single analysis or batch process multiple files.
 
 Continue reading for details or skip to the [PCD data analysis section](#PCD_images_(week_of_2026-02-09)) 
 
@@ -13,13 +13,15 @@ Continue reading for details or skip to the [PCD data analysis section](#PCD_ima
 ## Example exports: 
 
 ### 3D rendering
-![alt text](exports/blender-renders/fresnel-render.png)
+
+<!-- ![alt text](exports/blender-renders/fresnel-render.png) -->
+exports/blender-renders/PCD_waviness-roughness_loop.gif
 
 ---
 
 ### Image analysis gamut
 
-![alt text](exports/analysis_images/gamut.png)
+![gamut](exports/analysis_images/gamut.png)
 
 ---
 
@@ -29,7 +31,7 @@ Continue reading for details or skip to the [PCD data analysis section](#PCD_ima
 
 Optical profilometery can be error-prone when sample features (steepness, roughness, transparency, emissivity) prevent sufficient light from reaching the detector.  Forsooth, some of the raw images here are missing nearly half of their pixels (recorded NaN/no value).  A haphazard accounting for this data can substantially alter analysis, and so we use a robust interpolation method to account for missing data.
 
-![alt text](exports/analysis_images/DataCoverage.jpg)
+![data coverage](exports/analysis_images/DataCoverage.jpg)
 
 **Bilinear** 2D linear interpolation is the default method.  For extrapolation (at the edges of the dataset), it uses nearest neighbor interpolation.
 
@@ -75,7 +77,7 @@ The surface is decomposed into three spatial frequency regimes:
 - **Waviness**: Medium-scale features (Gaussian/Weierstrass filter)
 - **Roughness**: Fine-scale texture (residual)
 
-![alt text](exports/analysis_images/decomposition.jpg)
+![height decomposition](exports/analysis_images/decomposition.jpg)
 
 The decomposition is performed by the `decompose_surface()` function in three sequential steps:
 

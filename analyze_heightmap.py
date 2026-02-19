@@ -172,47 +172,58 @@ def load_xyz_file(filepath, resolution_factor=1):
     return data, metadata
 
 
-def export_roughness_to_obj(roughness, pixel_spacing_um, output_path):
+def export_heightmap_to_obj(heightmap, pixel_spacing_um, output_path, label='heightmap'):
     """
-    Export roughness data to Wavefront OBJ format for Blender import.
+    Export a heightmap to Wavefront OBJ format for Blender import.
     
     Args:
-        roughness: 2D numpy array of roughness values (in microns)
+        heightmap: 2D numpy array of height values (in microns)
         pixel_spacing_um: Pixel spacing in microns
         output_path: Path to output OBJ file
+        label: Human-readable label for the surface component (e.g. 'roughness', 'form')
     """
-    print(f"\nExporting roughness to OBJ format...")
+    print(f"\nExporting {label} to OBJ format...")
     start_time = time.time()
     
-    height, width = roughness.shape
+    height, width = heightmap.shape
     
     # Scale factor for better visualization in Blender (convert µm to mm)
     scale_xy = pixel_spacing_um / 1000.0  # Convert to mm
     scale_z = 1.0 / 1000.0  # Convert µm to mm
     
+    # Center offsets: place XY origin at center of surface
+    x_offset = (width - 1) * scale_xy / 2.0
+    y_offset = (height - 1) * scale_xy / 2.0
+    
+    # Z offset: shift so minimum height sits at Z=0 (surface extends into +Z)
+    z_min = np.nanmin(heightmap)
+    if np.isnan(z_min):
+        z_min = 0.0
+    
     with open(output_path, 'w') as f:
         # Write header
-        f.write("# Wavefront OBJ file - Roughness Surface\n")
+        f.write(f"# Wavefront OBJ file - {label.title()} Surface\n")
         f.write(f"# Generated from optical profilometry data\n")
         f.write(f"# Dimensions: {width} x {height} pixels\n")
         f.write(f"# Pixel spacing: {pixel_spacing_um:.3f} µm\n")
         f.write(f"# Units: millimeters (X, Y, Z)\n")
-        f.write(f"# Z values represent roughness component\n\n")
+        f.write(f"# Z values represent {label} component\n")
+        f.write(f"# Origin: centered at XY midpoint, Z=0 at minimum height\n\n")
         
         # Write vertices
         f.write("# Vertices\n")
         for y in range(height):
             for x in range(width):
-                z_val = roughness[y, x]
+                z_val = heightmap[y, x]
                 if np.isnan(z_val):
-                    z_val = 0.0  # Replace NaN with 0
+                    z_val = z_min  # Replace NaN with minimum (maps to Y=0)
                 
-                # OBJ coordinates: X, Y, Z in mm
-                x_mm = x * scale_xy
-                y_mm = y * scale_xy
-                z_mm = z_val * scale_z
+                # OBJ coordinates: X/Z are the grid plane, Y is up (Blender Y-up)
+                vx = x * scale_xy - x_offset
+                vy = (z_val - z_min) * scale_z   # height → Y (up in Blender)
+                vz = y * scale_xy - y_offset
                 
-                f.write(f"v {x_mm:.6f} {y_mm:.6f} {z_mm:.6f}\n")
+                f.write(f"v {vx:.6f} {vy:.6f} {vz:.6f}\n")
         
         # Write faces (triangles)
         f.write("\n# Faces\n")
@@ -941,23 +952,14 @@ Examples:
   # Analyze at full resolution
   python analyze_profilometry.py data.xyz
   
-  # Analyze with 4x downsampling for faster processing
-  python analyze_profilometry.py data.xyz -r 4
-  
-  # Interpolate missing data with bilinear method
-  python analyze_profilometry.py data.xyz -r 4 --interpolate bilinear
-  
-  # Use Laplacian interpolation (good for edges)
-  python analyze_profilometry.py data.xyz -r 4 --interpolate laplacian
-  
-  # Use kriging interpolation (slower but smooth)
-  python analyze_profilometry.py data.xyz -r 4 --interpolate kriging
-  
   # Save outputs to a directory
-  python analyze_profilometry.py data.xyz -r 2 -o results/
+  python analyze_profilometry.py data.xyz -o results/
   
-  # Process without showing plots (save only)
-  python analyze_profilometry.py data.xyz -o results/ --no-display
+  # Export roughness surface as OBJ for Blender
+  python analyze_profilometry.py data.xyz --export-obj roughness
+  
+  # Export multiple surfaces as separate OBJ files
+  python analyze_profilometry.py data.xyz --export-obj raw form roughness waviness+roughness
         """
     )
     
@@ -969,8 +971,10 @@ Examples:
     parser.add_argument('-i', '--interpolate', type=str, default='bilinear',
                        choices=['bilinear', 'laplacian', 'kriging'],
                        help='Interpolate NaN values using specified method (default: bilinear)')
-    parser.add_argument('--export-obj', action='store_true',
-                       help='Export roughness map to OBJ file for Blender import')
+    parser.add_argument('--export-obj', nargs='+', metavar='MAP',
+                       choices=['raw', 'form', 'roughness', 'waviness+roughness'],
+                       help='Export heightmap(s) to OBJ for Blender import. '
+                            'Choose one or more of: raw, form, roughness, waviness+roughness')
     parser.add_argument('-o', '--output-dir', type=str, default=None,
                        help='Directory to save output figures and statistics')
     parser.add_argument('--no-display', action='store_true',
@@ -1091,15 +1095,11 @@ Examples:
         if not args.no_display and not args.output_dir:
             print("\nDisplaying interactive plots...")
     
-    # Export roughness to OBJ if requested
+    # Export selected heightmaps to OBJ if requested
     if args.export_obj:
-        # Compute roughness if not already done (stats_only mode)
-        if args.stats_only:
-            from scipy.ndimage import gaussian_filter
-            # Quick decomposition for export only
-            form, waviness, roughness = decompose_surface(data, metadata['pixel_spacing_um'])
-        else:
-            # Reuse decomposition from visualization
+        # Decompose surface (needed for form, roughness, waviness+roughness)
+        needs_decomposition = any(m in args.export_obj for m in ['form', 'roughness', 'waviness+roughness'])
+        if needs_decomposition:
             form, waviness, roughness = decompose_surface(data, metadata['pixel_spacing_um'])
         
         # Set up output directory
@@ -1109,8 +1109,18 @@ Examples:
         else:
             output_dir = input_path.parent
         
-        obj_file = output_dir / f"{input_path.stem}_roughness.obj"
-        export_roughness_to_obj(roughness, metadata['pixel_spacing_um'], obj_file)
+        # Build mapping of selected names to (array, label) pairs
+        export_map = {
+            'raw':             (data,             'raw'),
+            'form':            (form if needs_decomposition else None, 'form'),
+            'roughness':       (roughness if needs_decomposition else None, 'roughness'),
+            'waviness+roughness': ((waviness + roughness) if needs_decomposition else None, 'waviness+roughness'),
+        }
+        
+        for map_name in args.export_obj:
+            heightmap, label = export_map[map_name]
+            obj_file = output_dir / f"{input_path.stem}_{label}.obj"
+            export_heightmap_to_obj(heightmap, metadata['pixel_spacing_um'], obj_file, label=label)
     
     print("\nAnalysis complete!")
     return 0
