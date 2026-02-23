@@ -438,7 +438,8 @@ optional arguments:
                         Resolution reduction factor for faster processing (default: 1)
   -i, --interpolate {bilinear,laplacian,kriging}
                         Interpolate NaN values using specified method (default: None)
-  --export-obj          Export roughness map to OBJ file for Blender import
+  --export-obj {raw,form,roughness,form+roughness}
+                        Export roughness map to OBJ file for Blender import
   -o, --output-dir OUTPUT_DIR
                         Directory to save output figures and statistics
   --no-display          Do not display plots interactively (only save)
@@ -457,7 +458,7 @@ py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz
 py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz -r 4 -i kriging -o --bounds 100 400 200 500 results/
 
 # Export roughness map as OBJ file (for 3D visualization in Blender or elsewhere)
-py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz --export-obj -o results/
+py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz --export-obj roughness form -o exports/
 
 # Windows PowerShell Batch Processing
 Get-ChildItem heightmaps\*.xyz | ForEach-Object { py analyze_profilometry.py $_.FullName -r 4 -i bilinear -o results/ --no-display }
