@@ -633,6 +633,68 @@ $$\phi(r) = r^2 \ln(r)$$
 > 200mm XY stage and 100mm Z clearance with capacity for up to 10lbs.
 > A white light interferometer is a type of profilometer in which light from a lamp is split into two paths by a beam splitter. One path directs the light onto the surface under test, the other path directs the light to a reference mirror. Reflections from the two surfaces are recombined and projected onto an array detector. When the path difference between the recombined beams is on the order of a few wavelengths of light or less, interference can occur. This interference contains information about the surface contours of the test surface. Vertical resolution can be on the order of several angstroms while lateral resolution depends upon the system and objective and is typically in the range of 0.26um – 4.4um.
 
-## Reading
+### MetroPro Reference Guide - Zygo XYZ Data File Format Excerpt
+
+see the manual in ./literature; p12-26
+
+>### XYZ Data File Format
+>>This section describes the format of a MetroPro XYZ data file. The file is made up of two parts: header and measurement data. The parts are separated by a line containing a sharp (#) character. Using the dat_to_xyz conversion utility creates a MetroPro XYZ data file from a MetroPro binary data file. Using the xyz_to_dat conversion utility creates a MetroPro binary data file from a XYZ data file.
+>### XYZ Data File Header Information
+>>This section is identical to the MetroPro ASCII data file header. See the section in the ASCII Data File Format for more information. XYZ Data File Connected Phase Data The data in this section is organized by phase origin. Each line contains three pieces of data. The first two columns contain the column (y) and row (x) location of the data, beginning at the phase origin. The third number on the line can be either the character string “No Data” or a floating-point number corresponding to the measurement in microns. To convert these measurements to ‘zygos’, use the following formula. (The names in parenthesis refer to the Binary Data Format field names).
+>>>The data in the file is in microns. To convert to meters:
+>>>>For Low resolution (0) phase data:
+Multiply third column data in by:
+(4096/ (IntfScaleFactor*ObliquityFactor*WavelengthIn*1000000))
+
+>>>For High resolution (1) phase data:
+>>>>Multiply third column data by:
+(32768/ (IntfScaleFactor*ObliquityFactor*WavelengthIn*1000000))
+
+>>>The PhaseRes is the first value of the eleventh line of the header. Convert the result to an integer to be stored in the binary file. This will cause round-off error, but amounts to a less than one Angstrom variance from the original data.
+XYZ Pixel Resolution The camera resolution is found on the eighth line of the header (CameraRes) (in meters/pixel). Multiply this number by the appropriate factor to obtain the resolution needed. The horizontal and vertical pixel resolution can be calculated as follows:
+>>>>CameraRes = 1.81512e-005
+>>>>To get microns (10 -6 meters): (.000018512)*(1000000) = 18.512 microns.
+
+>>>The horizontal and vertical pixel resolutions are the same.
+
+>XYZ Data File Notes
+>>Be aware that the resultant file will be larger than the original file due to it being ASCII, not binary, and requiring three fields (x, y, z) for the original phase data. Intensity data will be lost when the file is converted back to binary (.dat) format, since it is not maintained in the .xyz file.
+
+The ASCII file info is found on page 12/7-13 of the manual
+
+(example: PCD_01mmcrosshatch_2.75x_05x_002.xyz)
+- Software major version: 8
+- Phase Width: 1024
+- Phase Height: 1024
+  - width (columns) and height (rows) of the connected phase data matrix
+- intf Scale Factor: 0.5
+  - interferometric scale factor. It is the number of waves per fringe as specified by the user
+- WavelengthIn: 5.79911e-07
+  - the wavelength, in meters, at which the interferogram was measured.
+- Numeric Aperture: 0.08
+  - 1 / (2 * f-number)
+- Obliquity Factor: 1
+  - phase correction factor required when using a Mirau objective on a microscope. A value of 1.0 indicates no correction factor was required
+- Camera Resolution: 5.88029e-06
+  - lateral resolving power of a camera pixel in meters/pixel
+- Timestamp: 1770656283
+  - This integer is the system representation of the date and time the data was
+measured or generated. It is the number of seconds since 0:00:00 January 1, 1970.
+- Camera Width: 1024
+  - width (columns) of the usable camera field in pixels
+- Camera Height: 1024
+  - height (rows) of the usable camera field in pixels
+- System Serial: 80044
+- Light Level: 8.06744
+- PhaseRes: 1
+  - the resolution of the phase data points. A value of 0 indicates normal resolution, with each fringe represented by 4096 counts. A value of 1 indicates high resolution, with each fringe represented by 32768 counts
+- PhaseAvgs: 1
+  - number of phase averages performed
+- SubtractSysErr: 1
+  - whether or not the system error was subtracted from the phase data. A value of 1 indicates that it was subtracted; a value of 0 indicates it was not subtracted
+- Refractive Index: 1
+  - the index of refraction as specified by the user. Currently, this value is used only in the calculation of corner cube dihedral angles
+
+### Further Reading
 
 The literature folder contains a collection of papers and standards covering some of the analysis techniques for image processing, as well as possible considerations for polymer coating
