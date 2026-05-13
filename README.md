@@ -8,6 +8,42 @@ It is meant to be run from the command line with various flags to control the an
 
 Continue reading for details or skip to the [PCD data analysis section](#PCD_images_(week_of_2026-02-09)) 
 
+## Docker
+
+This project can also be packaged as a headless Docker CLI. The image contains the code and Python dependencies only; raw `.xyz` inputs and generated outputs should be bind-mounted at runtime.
+
+- Mount inputs under `/data` as read-only.
+- Mount an output directory under `/out` for figures, statistics, and OBJ exports.
+- Use `--no-display` in the container. It requires `-o /out` so plots are saved instead of shown.
+
+```powershell
+New-Item -ItemType Directory -Force .\docker-out | Out-Null
+
+docker build -t optical-profilometer .
+
+docker run --rm optical-profilometer
+
+docker run --rm `
+  --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
+  optical-profilometer /data/test.xyz --stats-only -r 32
+
+docker run --rm `
+  --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
+  --mount "type=bind,source=${PWD}\docker-out,target=/out" `
+  optical-profilometer /data/test.xyz -o /out --no-display -r 32
+
+docker run --rm `
+  --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
+  --mount "type=bind,source=${PWD}\docker-out,target=/out" `
+  optical-profilometer /data/test.xyz -o /out --no-display --export-obj roughness -r 32
+
+docker run --rm --entrypoint python optical-profilometer interpolation_study.py
+```
+
+To mount an entire dataset directory instead of a single file, replace the file mount with `--mount "type=bind,source=${PWD}\heightmaps,target=/data,readonly"` and pass the matching in-container file path such as `/data/2026-03_PCD-1um-pristine/low_zoom_01.xyz`.
+
+If you use Docker Desktop on Windows, bind-mounted I/O is usually faster from the WSL/Linux filesystem than from a OneDrive-backed Windows path.
+
 ---
 
 ## Example exports: 
@@ -422,7 +458,7 @@ Optionally export roughness map as OBJ file for import and rendering in Blender 
 ## Command-Line Options
 
 ```
-usage: analyze_profilometry.py [-h] [-r {1,2,4,8,16,32}] 
+usage: analyze_heightmap.py [-h] [-r {1,2,4,8,16,32}] 
                                [-i {bilinear,laplacian,kriging}]
                                [--export-obj] [-o OUTPUT_DIR]
                                [--no-display] [--stats-only]
@@ -438,7 +474,7 @@ optional arguments:
                         Resolution reduction factor for faster processing (default: 1)
   -i, --interpolate {bilinear,laplacian,kriging}
                         Interpolate NaN values using specified method (default: None)
-  --export-obj {raw,form,roughness,form+roughness}
+  --export-obj {raw,form,roughness,waviness+roughness}
                         Export roughness map to OBJ file for Blender import
   -o, --output-dir OUTPUT_DIR
                         Directory to save output figures and statistics
@@ -452,16 +488,16 @@ optional arguments:
 
 ```bash
 # Full resolution analysis, default to bilinear inerpolation
-py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz
+py analyze_heightmap.py heightmaps/PCD_01mm_2.75x_05x_001.xyz
 
 # Save cropped, kriging-interpolated vis/stats to 'results' folder
-py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz -r 4 -i kriging -o --bounds 100 400 200 500 results/
+py analyze_heightmap.py heightmaps/PCD_01mm_2.75x_05x_001.xyz -r 4 -i kriging -o results/ --bounds 100 400 200 500 --no-display
 
 # Export roughness map as OBJ file (for 3D visualization in Blender or elsewhere)
-py analyze_profilometry.py heightmaps/PCD_01mm_2.75x_05x_001.xyz --export-obj roughness form -o exports/
+py analyze_heightmap.py heightmaps/PCD_01mm_2.75x_05x_001.xyz --export-obj roughness form -o exports/
 
 # Windows PowerShell Batch Processing
-Get-ChildItem heightmaps\*.xyz | ForEach-Object { py analyze_profilometry.py $_.FullName -r 4 -i bilinear -o results/ --no-display }
+Get-ChildItem heightmaps\*.xyz | ForEach-Object { py analyze_heightmap.py $_.FullName -r 4 -i bilinear -o results/ --no-display }
 ```
 
 ---

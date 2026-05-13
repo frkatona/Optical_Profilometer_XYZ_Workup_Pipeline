@@ -950,16 +950,16 @@ def main():
         epilog="""
 Examples:
   # Analyze at full resolution
-  python analyze_profilometry.py data.xyz
+  python analyze_heightmap.py data.xyz
   
   # Save outputs to a directory
-  python analyze_profilometry.py data.xyz -o results/
+  python analyze_heightmap.py data.xyz -o results/
   
   # Export roughness surface as OBJ for Blender
-  python analyze_profilometry.py data.xyz --export-obj roughness
+  python analyze_heightmap.py data.xyz --export-obj roughness
   
   # Export multiple surfaces as separate OBJ files
-  python analyze_profilometry.py data.xyz --export-obj raw form roughness waviness+roughness
+  python analyze_heightmap.py data.xyz --export-obj raw form roughness waviness+roughness
         """
     )
     
@@ -990,6 +990,10 @@ Examples:
     input_path = Path(args.input_file)
     if not input_path.exists():
         print(f"Error: File not found: {input_path}")
+        return 1
+
+    if args.no_display and not args.output_dir:
+        print("Error: --no-display requires --output-dir so plots can be saved instead of shown.")
         return 1
     
     # Load data
@@ -1089,9 +1093,9 @@ Examples:
     
     # Create visualizations unless stats-only mode
     if not args.stats_only:
-        output_dir = args.output_dir if args.output_dir or args.no_display else None
+        output_dir = args.output_dir
         create_visualizations(data, metadata, stats, output_dir, original_data=original_data)
-        
+
         if not args.no_display and not args.output_dir:
             print("\nDisplaying interactive plots...")
     
