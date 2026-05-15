@@ -44,6 +44,47 @@ To mount an entire dataset directory instead of a single file, replace the file 
 
 If you use Docker Desktop on Windows, bind-mounted I/O is usually faster from the WSL/Linux filesystem than from a OneDrive-backed Windows path.
 
+### Optional Blender renderer target
+
+The default image stays small and only handles analysis, plots, and OBJ export. If you want a headless Blender render step, build the optional `blender-renderer` target as a separate image:
+
+```powershell
+docker build --target blender-renderer -t optical-profilometer-blender .
+```
+
+Then render an exported OBJ into a still image:
+
+```powershell
+docker run --rm `
+  --mount "type=bind,source=${PWD}\docker-out,target=/out" `
+  optical-profilometer-blender `
+  --input /out/test_roughness.obj `
+  --output /out/test_roughness_render.png
+```
+
+Useful optional flags:
+
+- `--engine CYCLES` or `--engine BLENDER_WORKBENCH`
+- `--resolution-x 1920 --resolution-y 1080`
+- `--samples 128`
+- `--camera-azimuth 45 --camera-elevation 30`
+- `--transparent-background`
+
+The Blender target expects an existing OBJ file, so the typical workflow is:
+
+```powershell
+docker run --rm `
+  --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
+  --mount "type=bind,source=${PWD}\docker-out,target=/out" `
+  optical-profilometer /data/test.xyz -o /out --no-display --export-obj roughness -r 32
+
+docker run --rm `
+  --mount "type=bind,source=${PWD}\docker-out,target=/out" `
+  optical-profilometer-blender `
+  --input /out/test_roughness.obj `
+  --output /out/test_roughness_render.png
+```
+
 ---
 
 ## Example exports: 
