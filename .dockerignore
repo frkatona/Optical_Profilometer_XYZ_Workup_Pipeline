@@ -13,6 +13,10 @@ exports/
 literature/
 _tmp_compare/
 docker-out/
+webui_data/
+blender/__pycache__/
+static/__pycache__/
+templates/__pycache__/
 
 *.xyz
 *.pdf

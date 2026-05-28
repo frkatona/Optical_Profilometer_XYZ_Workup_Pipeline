@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Optical Profilometry Workbench</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='webui.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Optical Profilometry Workbench</h1>
+      <p>Upload an XYZ file, run analysis jobs, watch progress, and download results.</p>
+    </div>
+    <div class="caps">
+      <span class="chip">Workers: {{ max_workers }}</span>
+      <span class="chip {% if blender_available %}ok{% else %}warn{% endif %}">
+        Blender: {% if blender_available %}available{% else %}not installed on this server{% endif %}
+      </span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel form-panel">
+      <h2>New Job</h2>
+      <form id="job-form">
+        <div class="form-grid">
+          <label>
+            <span>XYZ file</span>
+            <input type="file" name="input_file" accept=".xyz">
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="use_bundled_sample" {% if not sample_available %}disabled{% endif %}>
+            <span>Use bundled sample `test.xyz` {% if not sample_available %}(not available on this server){% endif %}</span>
+          </label>
+
+          <label>
+            <span>Resolution factor</span>
+            <select name="resolution_factor">
+              <option value="1">1x</option>
+              <option value="2">2x</option>
+              <option value="4">4x</option>
+              <option value="8">8x</option>
+              <option value="16">16x</option>
+              <option value="32" selected>32x</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Interpolation</span>
+            <select name="interpolate">
+              <option value="bilinear" selected>Bilinear</option>
+              <option value="laplacian">Laplacian</option>
+              <option value="kriging">Kriging</option>
+            </select>
+          </label>
+
+          <label class="checkbox">
+            <input type="checkbox" name="stats_only">
+            <span>Stats only</span>
+          </label>
+        </div>
+
+        <fieldset>
+          <legend>Crop bounds in microns</legend>
+          <div class="form-grid compact">
+            <label><span>X1</span><input type="number" step="any" name="bound_x1"></label>
+            <label><span>X2</span><input type="number" step="any" name="bound_x2"></label>
+            <label><span>Y1</span><input type="number" step="any" name="bound_y1"></label>
+            <label><span>Y2</span><input type="number" step="any" name="bound_y2"></label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>OBJ exports</legend>
+          <div class="checkbox-grid">
+            {% for export_map in export_maps %}
+            <label class="checkbox">
+              <input type="checkbox" name="export_obj" value="{{ export_map }}" {% if export_map == 'roughness' %}checked{% endif %}>
+              <span>{{ export_map }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </fieldset>
+
+        <fieldset id="render-fieldset" {% if not blender_available %}data-disabled="true"{% endif %}>
+          <legend>Blender render extension</legend>
+          <label class="checkbox">
+            <input type="checkbox" name="enable_render" {% if not blender_available %}disabled{% endif %}>
+            <span>Render an exported OBJ after analysis</span>
+          </label>
+
+          <div class="form-grid">
+            <label>
+              <span>Render source map</span>
+              <select name="render_source">
+                {% for export_map in export_maps %}
+                <option value="{{ export_map }}" {% if export_map == 'roughness' %}selected{% endif %}>{{ export_map }}</option>
+                {% endfor %}
+              </select>
+            </label>
+
+            <label>
+              <span>Image format</span>
+              <select name="render_output_format">
+                <option value="png" selected>PNG</option>
+                <option value="jpg">JPG</option>
+                <option value="bmp">BMP</option>
+                <option value="tiff">TIFF</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Engine</span>
+              <select name="render_engine">
+                <option value="CYCLES" selected>Cycles</option>
+                <option value="BLENDER_WORKBENCH">Workbench</option>
+              </select>
+            </label>
+
+            <label><span>Samples</span><input type="number" name="render_samples" value="64"></label>
+            <label><span>Resolution X</span><input type="number" name="render_resolution_x" value="1600"></label>
+            <label><span>Resolution Y</span><input type="number" name="render_resolution_y" value="1200"></label>
+          </div>
+
+          <div class="subsection">
+            <h3>Camera</h3>
+            <div class="form-grid compact">
+              <label><span>Distance scale</span><input type="number" step="any" name="camera_distance_scale" value="2.1"></label>
+              <label><span>Azimuth</span><input type="number" step="any" name="camera_azimuth" value="35"></label>
+              <label><span>Elevation</span><input type="number" step="any" name="camera_elevation" value="32"></label>
+              <label><span>Lens</span><input type="number" step="any" name="camera_lens" value="55"></label>
+            </div>
+          </div>
+
+          <div class="subsection">
+            <h3>Orientation</h3>
+            <div class="form-grid compact">
+              <label><span>Rotate X</span><input type="number" step="any" name="rotation_x" value="0"></label>
+              <label><span>Rotate Y</span><input type="number" step="any" name="rotation_y" value="0"></label>
+              <label><span>Rotate Z</span><input type="number" step="any" name="rotation_z" value="0"></label>
+            </div>
+          </div>
+
+          <div class="subsection">
+            <h3>Lighting</h3>
+            <div class="form-grid compact">
+              <label><span>World strength</span><input type="number" step="any" name="world_strength" value="0.85"></label>
+              <label><span>Key light energy</span><input type="number" step="any" name="key_light_energy" value="3500"></label>
+              <label><span>Fill light energy</span><input type="number" step="any" name="fill_light_energy" value="1.8"></label>
+            </div>
+          </div>
+
+          <div class="subsection">
+            <h3>Material</h3>
+            <div class="form-grid compact">
+              <label><span>Color</span><input type="color" name="material_color" value="#c7d3e5"></label>
+              <label><span>Roughness</span><input type="number" min="0" max="1" step="any" name="material_roughness" value="0.38"></label>
+              <label><span>Metallic</span><input type="number" min="0" max="1" step="any" name="material_metallic" value="0.08"></label>
+              <label><span>Specular</span><input type="number" min="0" max="1" step="any" name="material_specular" value="0.55"></label>
+            </div>
+            <label class="checkbox">
+              <input type="checkbox" name="transparent_background">
+              <span>Transparent background</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div class="actions">
+          <button type="submit" id="submit-button">Start job</button>
+          <span id="submit-status" class="muted"></span>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel jobs-panel">
+      <div class="panel-header">
+        <h2>Jobs</h2>
+        <button type="button" id="refresh-jobs">Refresh</button>
+      </div>
+      <div id="jobs-list" class="job-list"></div>
+    </section>
+
+    <section class="panel detail-panel">
+      <h2>Job Detail</h2>
+      <div id="job-detail" class="empty-state">Select a job to see progress, stats, previews, and downloads.</div>
+    </section>
+  </main>
+
+  <script>
+    window.WEBUI_BOOTSTRAP = {
+      blenderAvailable: {{ 'true' if blender_available else 'false' }},
+      exportMaps: {{ export_maps|tojson }}
+    };
+  </script>
+  <script src="{{ url_for('static', filename='webui.js') }}"></script>
+</body>
+</html>

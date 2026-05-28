@@ -85,6 +85,36 @@ docker run --rm `
   --output /out/test_roughness_render.png
 ```
 
+### Optional web UI
+
+There is also a barebones web UI for uploading `.xyz` files, choosing analysis and render settings, monitoring progress, previewing images, and downloading stats CSVs plus generated artifacts.
+
+Run it locally:
+
+```powershell
+py web_ui.py --host 127.0.0.1 --port 8000
+```
+
+Then open `http://127.0.0.1:8000`.
+
+Build the Docker image for the UI:
+
+```powershell
+docker build --target web-ui -t optical-profilometer-web .
+```
+
+Run the Dockerized UI and persist job files to a host folder:
+
+```powershell
+New-Item -ItemType Directory -Force .\webui-data | Out-Null
+
+docker run --rm -p 8000:8000 `
+  --mount "type=bind,source=${PWD}\webui-data,target=/app/webui_data" `
+  optical-profilometer-web
+```
+
+The `web-ui` target includes Blender, so the render controls in the UI are available there even if Blender is not installed on the host machine.
+
 ---
 
 ## Example exports: 

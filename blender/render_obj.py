@@ -58,6 +58,71 @@ def parse_args():
         help="Camera elevation angle in degrees above the XZ plane",
     )
     parser.add_argument(
+        "--camera-lens",
+        type=float,
+        default=55.0,
+        help="Camera lens length in millimeters",
+    )
+    parser.add_argument(
+        "--rotation-x",
+        type=float,
+        default=0.0,
+        help="Rotate the imported object around X in degrees",
+    )
+    parser.add_argument(
+        "--rotation-y",
+        type=float,
+        default=0.0,
+        help="Rotate the imported object around Y in degrees",
+    )
+    parser.add_argument(
+        "--rotation-z",
+        type=float,
+        default=0.0,
+        help="Rotate the imported object around Z in degrees",
+    )
+    parser.add_argument(
+        "--world-strength",
+        type=float,
+        default=0.85,
+        help="Background light strength",
+    )
+    parser.add_argument(
+        "--key-light-energy",
+        type=float,
+        default=3500.0,
+        help="Key area light energy",
+    )
+    parser.add_argument(
+        "--fill-light-energy",
+        type=float,
+        default=1.8,
+        help="Fill sun light energy",
+    )
+    parser.add_argument(
+        "--material-color",
+        default="#c7d3e5",
+        help="Base material color as a hex string, for example #c7d3e5",
+    )
+    parser.add_argument(
+        "--material-roughness",
+        type=float,
+        default=0.38,
+        help="Material roughness value between 0 and 1",
+    )
+    parser.add_argument(
+        "--material-metallic",
+        type=float,
+        default=0.08,
+        help="Material metallic value between 0 and 1",
+    )
+    parser.add_argument(
+        "--material-specular",
+        type=float,
+        default=0.55,
+        help="Material specular or specular IOR level value between 0 and 1",
+    )
+    parser.add_argument(
         "--transparent-background",
         action="store_true",
         help="Render with a transparent film background",
@@ -101,6 +166,14 @@ def smooth_object(obj):
     bpy.ops.object.shade_smooth()
 
 
+def rotate_object(obj, args):
+    obj.rotation_euler = (
+        math.radians(args.rotation_x),
+        math.radians(args.rotation_y),
+        math.radians(args.rotation_z),
+    )
+
+
 def object_bounds(obj):
     corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
     min_corner = Vector(
@@ -127,19 +200,29 @@ def look_at(obj, target, track_axis="-Z", up_axis="Y"):
     obj.rotation_euler = direction.to_track_quat(track_axis, up_axis).to_euler()
 
 
-def create_material():
+def hex_to_rgba(value):
+    value = value.strip().lstrip("#")
+    if len(value) != 6:
+        raise ValueError("Material color must be a 6-digit hex string like #c7d3e5")
+    r = int(value[0:2], 16) / 255.0
+    g = int(value[2:4], 16) / 255.0
+    b = int(value[4:6], 16) / 255.0
+    return (r, g, b, 1.0)
+
+
+def create_material(args):
     material = bpy.data.materials.new(name="ProfilometrySurface")
     material.use_nodes = True
     nodes = material.node_tree.nodes
     principled = nodes.get("Principled BSDF")
     if principled is not None:
-        principled.inputs["Base Color"].default_value = (0.78, 0.83, 0.9, 1.0)
-        principled.inputs["Roughness"].default_value = 0.38
-        principled.inputs["Metallic"].default_value = 0.08
+        principled.inputs["Base Color"].default_value = hex_to_rgba(args.material_color)
+        principled.inputs["Roughness"].default_value = args.material_roughness
+        principled.inputs["Metallic"].default_value = args.material_metallic
         if "Specular IOR Level" in principled.inputs:
-            principled.inputs["Specular IOR Level"].default_value = 0.55
+            principled.inputs["Specular IOR Level"].default_value = args.material_specular
         elif "Specular" in principled.inputs:
-            principled.inputs["Specular"].default_value = 0.55
+            principled.inputs["Specular"].default_value = args.material_specular
     return material
 
 
@@ -150,14 +233,32 @@ def assign_material(obj, material):
         obj.data.materials.append(material)
 
 
-def setup_world(transparent):
-    world = bpy.data.worlds["World"]
+def setup_world(args):
+    scene = bpy.context.scene
+    world = scene.world or bpy.data.worlds.get("World")
+    if world is None:
+        world = bpy.data.worlds.new(name="World")
+    scene.world = world
     world.use_nodes = True
-    background = world.node_tree.nodes.get("Background")
-    if background is not None:
-        background.inputs[0].default_value = (0.025, 0.03, 0.04, 1.0)
-        background.inputs[1].default_value = 0.85
-    bpy.context.scene.render.film_transparent = transparent
+    nodes = world.node_tree.nodes
+    links = world.node_tree.links
+
+    background = nodes.get("Background")
+    if background is None:
+        background = nodes.new(type="ShaderNodeBackground")
+
+    output = nodes.get("World Output")
+    if output is None:
+        output = nodes.new(type="ShaderNodeOutputWorld")
+
+    if not any(
+        link.from_node == background and link.to_node == output for link in links
+    ):
+        links.new(background.outputs["Background"], output.inputs["Surface"])
+
+    background.inputs[0].default_value = (0.025, 0.03, 0.04, 1.0)
+    background.inputs[1].default_value = args.world_strength
+    scene.render.film_transparent = args.transparent_background
 
 
 def setup_camera(center, size, args):
@@ -178,19 +279,19 @@ def setup_camera(center, size, args):
             center.z + radius * math.cos(elevation) * math.sin(azimuth),
         )
     )
-    camera.data.lens = 55
+    camera.data.lens = args.camera_lens
     camera.data.clip_start = 0.001
     camera.data.clip_end = max(radius * 20.0, 100.0)
     look_at(camera, center)
     return camera
 
 
-def setup_lights(center, size):
+def setup_lights(center, size, args):
     span = max(size.x, size.z, 1.0)
     height = max(size.y, 0.1)
 
     key_data = bpy.data.lights.new(name="KeyLight", type="AREA")
-    key_data.energy = 3500
+    key_data.energy = args.key_light_energy
     key_data.shape = "RECTANGLE"
     key_data.size = span * 1.5
     key = bpy.data.objects.new("KeyLight", key_data)
@@ -199,7 +300,7 @@ def setup_lights(center, size):
     look_at(key, center)
 
     fill_data = bpy.data.lights.new(name="FillLight", type="SUN")
-    fill_data.energy = 1.8
+    fill_data.energy = args.fill_light_energy
     fill = bpy.data.objects.new("FillLight", fill_data)
     fill.location = Vector((center.x - span, center.y + height * 2.0 + 1.0, center.z + span))
     bpy.context.scene.collection.objects.link(fill)
@@ -240,7 +341,9 @@ def configure_render(output_path, args):
         scene.cycles.device = "CPU"
         scene.cycles.samples = args.samples
         if hasattr(scene.cycles, "use_denoising"):
-            scene.cycles.use_denoising = True
+            scene.cycles.use_denoising = bool(
+                getattr(bpy.app.build_options, "openimagedenoise", False)
+            )
 
 
 def main():
@@ -260,14 +363,15 @@ def main():
     imported = import_obj(input_path)
     obj = join_mesh_objects(imported)
     smooth_object(obj)
+    rotate_object(obj, args)
 
-    material = create_material()
+    material = create_material(args)
     assign_material(obj, material)
 
     _, _, center, size = object_bounds(obj)
-    setup_world(args.transparent_background)
+    setup_world(args)
     setup_camera(center, size, args)
-    setup_lights(center, size)
+    setup_lights(center, size, args)
     configure_render(output_path, args)
 
     bpy.ops.render.render(write_still=True)

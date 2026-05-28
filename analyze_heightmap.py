@@ -2,6 +2,7 @@
 Optical Profilometry Data Analysis and Visualization Script
 """
 
+import csv
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LightSource
@@ -370,7 +371,7 @@ def interpolate_nans(data, method='bilinear'):
     return result
 
 
-def decompose_surface(data, pixel_spacing_um):
+def decompose_surface(data, pixel_spacing_um, show_progress=True):
     """
     Decompose surface into form, waviness, and roughness components.
     
@@ -391,7 +392,7 @@ def decompose_surface(data, pixel_spacing_um):
         Roughness (fine-scale) - residual
     """
     print("\nDecomposing surface into form, waviness, and roughness...")
-    pbar = tqdm(total=4, desc="Surface decomposition", leave=False)
+    pbar = tqdm(total=4, desc="Surface decomposition", leave=False) if show_progress else None
     
     # Handle NaN values by using only valid data
     valid_mask = ~np.isnan(data)
@@ -541,7 +542,7 @@ def print_statistics(stats):
     print("="*60 + "\n")
 
 
-def create_visualizations(data, metadata, stats, output_dir=None, original_data=None):
+def create_visualizations(data, metadata, stats, output_dir=None, original_data=None, show_progress=True):
     """
     Create comprehensive visualizations of the profilometry data.
     
@@ -559,7 +560,7 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
         Original data before interpolation (for coverage map)
     """
     print("\nCreating enhanced visualizations...")
-    viz_pbar = tqdm(total=20, desc="Building plots", unit="plot")
+    viz_pbar = tqdm(total=20, desc="Building plots", unit="plot") if show_progress else None
     
     if output_dir:
         output_dir = Path(output_dir)
@@ -574,7 +575,7 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
                  0, data.shape[0] * pixel_spacing_mm]
     
     # Decompose surface into form, waviness, and roughness
-    form, waviness, roughness = decompose_surface(data, pixel_spacing_um)
+    form, waviness, roughness = decompose_surface(data, pixel_spacing_um, show_progress=show_progress)
     
     # Compute pre-interpolation coverage percentage
     data_for_coverage = original_data if original_data is not None else data
@@ -940,6 +941,238 @@ def create_visualizations(data, metadata, stats, output_dir=None, original_data=
         plt.show()
     
     plt.close()
+    return output_file if output_dir else None
+
+
+def write_statistics_text(metadata, stats, output_path):
+    """Write human-readable statistics to a text file."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(output_path, 'w', newline='') as f:
+        f.write("Optical Profilometry Analysis\n")
+        f.write(f"File: {metadata['filepath']}\n")
+        f.write(f"Resolution Factor: {metadata['resolution_factor']}x\n")
+        f.write(f"Interpolation Method: {metadata['interpolation_method']}\n")
+        f.write(f"Processed Size: {metadata['processed_size']}\n")
+        f.write(f"\n{'='*60}\n")
+        f.write("HEADER METADATA\n")
+        f.write(f"{'='*60}\n\n")
+        f.write(f"Lateral Sampling: {metadata['pixel_spacing_um']:.3f} Âµm/pixel\n")
+        f.write(f"Lateral Sampling: {metadata['pixel_spacing_um']:.6f} Âµm/pixel\n")
+        f.write(f"Original Dimensions: {metadata['original_size'][0]}x{metadata['original_size'][1]}\n")
+        if metadata['wavelength'] is not None:
+            f.write(f"Wavelength Parameter: {metadata['wavelength']}\n")
+        if metadata['coherence_flag'] is not None:
+            f.write(f"Coherence Flag: {metadata['coherence_flag']}\n")
+        if metadata['timestamp'] is not None:
+            from datetime import datetime
+            dt = datetime.fromtimestamp(metadata['timestamp'])
+            f.write(f"Acquisition Time: {dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"\n{'='*60}\n")
+        f.write("STATISTICAL ANALYSIS\n")
+        f.write(f"{'='*60}\n\n")
+        f.write(f"Processed Size: {metadata['processed_size']}\n")
+        f.write("Data Coverage:\n")
+        f.write(f"  Total points:   {stats['total_points']:,}\n")
+        f.write(f"  Valid points:   {stats['valid_points']:,}\n")
+        f.write(f"  Missing points: {stats['missing_points']:,}\n")
+        f.write(f"  Coverage:       {stats['coverage_percent']:.2f}%\n\n")
+        f.write("Height Statistics (Âµm):\n")
+        f.write(f"  Min:            {stats['min']:.6f}\n")
+        f.write(f"  Max:            {stats['max']:.6f}\n")
+        f.write(f"  Range:          {stats['range']:.6f}\n")
+        f.write(f"  Mean:           {stats['mean']:.6f}\n")
+        f.write(f"  Median:         {stats['median']:.6f}\n")
+        f.write(f"  Std Dev:        {stats['std']:.6f}\n")
+        f.write(f"  25th percentile:{stats['percentile_25']:.6f}\n")
+        f.write(f"  75th percentile:{stats['percentile_75']:.6f}\n\n")
+        f.write("Surface Roughness Parameters (Âµm):\n")
+        f.write(f"  Ra (avg roughness):     {stats['Ra']:.6f}\n")
+        f.write(f"  Rq (RMS roughness):     {stats['Rq']:.6f}\n")
+        f.write(f"  Rz (max height):        {stats['Rz']:.6f}\n")
+
+    return output_path
+
+
+def write_statistics_csv(metadata, stats, output_path):
+    """Write machine-readable statistics to a CSV file."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    row = {
+        'file': metadata['filepath'],
+        'resolution_factor': metadata['resolution_factor'],
+        'interpolation_method': metadata.get('interpolation_method', ''),
+        'processed_height_px': metadata['processed_size'][0],
+        'processed_width_px': metadata['processed_size'][1],
+        'original_width_px': metadata['original_size'][0],
+        'original_height_px': metadata['original_size'][1],
+        'pixel_spacing_um': metadata['pixel_spacing_um'],
+        'wavelength': metadata['wavelength'],
+        'coherence_flag': metadata['coherence_flag'],
+        'timestamp': metadata['timestamp'],
+    }
+    row.update(stats)
+
+    with open(output_path, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+        writer.writeheader()
+        writer.writerow(row)
+
+    return output_path
+
+
+def run_analysis_pipeline(
+    input_file,
+    resolution_factor=1,
+    interpolate='bilinear',
+    export_obj=None,
+    output_dir=None,
+    no_display=False,
+    stats_only=False,
+    bounds=None,
+    progress_callback=None,
+    show_progress=True,
+):
+    """Run the full analysis pipeline and return metadata plus artifact paths."""
+    export_obj = list(export_obj or [])
+    input_path = Path(input_file)
+
+    if not input_path.exists():
+        raise FileNotFoundError(f"File not found: {input_path}")
+    if no_display and not output_dir:
+        raise ValueError("--no-display requires --output-dir so plots can be saved instead of shown.")
+
+    def report(progress, stage, message):
+        if progress_callback:
+            progress_callback(progress, stage, message)
+
+    report(0.02, 'validating', f'Preparing analysis for {input_path.name}')
+    data, metadata = load_xyz_file(input_path, resolution_factor)
+    report(0.16, 'loaded', 'Input data loaded')
+
+    if bounds:
+        x1_um, x2_um, y1_um, y2_um = bounds
+        pixel_spacing_um = metadata['pixel_spacing_um']
+        x1_px = int(x1_um / pixel_spacing_um)
+        x2_px = int(x2_um / pixel_spacing_um)
+        y1_px = int(y1_um / pixel_spacing_um)
+        y2_px = int(y2_um / pixel_spacing_um)
+
+        if x1_px < 0 or x2_px > data.shape[1] or y1_px < 0 or y2_px > data.shape[0]:
+            print(
+                f"Warning: Bounds exceed data dimensions. Data size: "
+                f"{data.shape[1]*pixel_spacing_um:.0f}x{data.shape[0]*pixel_spacing_um:.0f} Âµm"
+            )
+            print(
+                f"Requested bounds: x=[{x1_um:.0f}, {x2_um:.0f}] Âµm, "
+                f"y=[{y1_um:.0f}, {y2_um:.0f}] Âµm"
+            )
+        if x1_px >= x2_px or y1_px >= y2_px:
+            raise ValueError("Invalid bounds. x1 must be < x2 and y1 must be < y2")
+
+        data = data[y1_px:y2_px, x1_px:x2_px]
+        print(f"Cropped to bounds: x=[{x1_um:.0f}, {x2_um:.0f}] Âµm, y=[{y1_um:.0f}, {y2_um:.0f}] Âµm")
+        print(f"Cropped size: {data.shape[1]}x{data.shape[0]} pixels")
+        metadata['bounds'] = (x1_um, x2_um, y1_um, y2_um)
+        metadata['bounds_px'] = (x1_px, x2_px, y1_px, y2_px)
+        metadata['processed_size'] = data.shape
+
+    original_data = data.copy()
+    report(0.24, 'prepared', 'Input prepared for interpolation')
+
+    if interpolate:
+        data = interpolate_nans(data, method=interpolate)
+        metadata['interpolation_method'] = interpolate
+    else:
+        metadata['interpolation_method'] = 'None'
+
+    report(0.44, 'interpolated', 'Interpolation complete')
+
+    stats = compute_statistics(data)
+    print_statistics(stats)
+    report(0.56, 'statistics', 'Statistics computed')
+
+    artifacts = {
+        'statistics_txt': None,
+        'statistics_csv': None,
+        'analysis_png': None,
+        'obj': {},
+    }
+
+    output_path = Path(output_dir) if output_dir else None
+    if output_path:
+        output_path.mkdir(parents=True, exist_ok=True)
+        stats_text_path = output_path / f"{input_path.stem}_statistics.txt"
+        stats_csv_path = output_path / f"{input_path.stem}_statistics.csv"
+        artifacts['statistics_txt'] = str(write_statistics_text(metadata, stats, stats_text_path))
+        artifacts['statistics_csv'] = str(write_statistics_csv(metadata, stats, stats_csv_path))
+        print(f"Statistics saved to: {stats_text_path}")
+        print(f"Statistics CSV saved to: {stats_csv_path}")
+
+    if not stats_only:
+        report(0.62, 'visualizing', 'Generating preview images')
+        analysis_image = create_visualizations(
+            data,
+            metadata,
+            stats,
+            output_path,
+            original_data=original_data,
+            show_progress=show_progress,
+        )
+        if analysis_image:
+            artifacts['analysis_png'] = str(analysis_image)
+        report(0.82, 'visualized', 'Preview images complete')
+
+        if not no_display and not output_dir:
+            print("\nDisplaying interactive plots...")
+
+    if export_obj:
+        report(0.86, 'exporting_obj', 'Preparing OBJ exports')
+        needs_decomposition = any(m in export_obj for m in ['form', 'roughness', 'waviness+roughness'])
+        if needs_decomposition:
+            form, waviness, roughness = decompose_surface(
+                data,
+                metadata['pixel_spacing_um'],
+                show_progress=show_progress,
+            )
+        else:
+            form = waviness = roughness = None
+
+        export_output_dir = output_path if output_path else input_path.parent
+        export_output_dir.mkdir(parents=True, exist_ok=True)
+        export_map = {
+            'raw': (data, 'raw'),
+            'form': (form if needs_decomposition else None, 'form'),
+            'roughness': (roughness if needs_decomposition else None, 'roughness'),
+            'waviness+roughness': (
+                (waviness + roughness) if needs_decomposition else None,
+                'waviness+roughness',
+            ),
+        }
+
+        for index, map_name in enumerate(export_obj, start=1):
+            heightmap, label = export_map[map_name]
+            obj_file = export_output_dir / f"{input_path.stem}_{label}.obj"
+            export_heightmap_to_obj(heightmap, metadata['pixel_spacing_um'], obj_file, label=label)
+            artifacts['obj'][label] = str(obj_file)
+            report(
+                0.86 + (0.10 * index / max(len(export_obj), 1)),
+                'exporting_obj',
+                f'Exported OBJ: {label}',
+            )
+
+    report(1.0, 'completed', 'Analysis complete')
+    print("\nAnalysis complete!")
+
+    return {
+        'input_file': str(input_path),
+        'output_dir': str(output_path) if output_path else None,
+        'metadata': metadata,
+        'stats': stats,
+        'artifacts': artifacts,
+    }
 
 
 def main():
