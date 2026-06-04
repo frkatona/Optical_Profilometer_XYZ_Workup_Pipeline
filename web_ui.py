@@ -24,6 +24,9 @@ DEFAULT_DATA_DIR = Path(os.environ.get("WEBUI_DATA_DIR", APP_ROOT / "webui_data"
 DEFAULT_MAX_WORKERS = int(os.environ.get("WEBUI_MAX_WORKERS", "2"))
 AVAILABLE_EXPORT_MAPS = ["raw", "form", "roughness", "waviness+roughness"]
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
+BENIGN_WORKBENCH_LINES = {
+    "EGL Error (0x3009): EGL_BAD_MATCH: Arguments are inconsistent (for example, a valid context requires buffers not supplied by a valid surface)."
+}
 
 
 def blender_executable():
@@ -188,17 +191,8 @@ def parse_bounds(form):
     return tuple(float(value) for value in values)
 
 
-def normalize_options(form):
-    export_maps = [value for value in form.getlist("export_obj") if value in AVAILABLE_EXPORT_MAPS]
-    options = {
-        "resolution_factor": int(form.get("resolution_factor", "1")),
-        "interpolate": form.get("interpolate", "bilinear"),
-        "stats_only": parse_bool(form.get("stats_only")),
-        "bounds": parse_bounds(form),
-        "export_obj": export_maps,
-    }
-
-    render_enabled = parse_bool(form.get("enable_render"))
+def normalize_render_options(form, enabled=None):
+    render_enabled = parse_bool(form.get("enable_render")) if enabled is None else bool(enabled)
     render_options = {
         "enabled": render_enabled,
         "render_source": form.get("render_source", "roughness"),
@@ -211,12 +205,17 @@ def normalize_options(form):
         "camera_azimuth": float(form.get("camera_azimuth", "35")),
         "camera_elevation": float(form.get("camera_elevation", "32")),
         "camera_lens": float(form.get("camera_lens", "55")),
+        "height_scale": float(form.get("height_scale", "1.0")),
+        "auto_height_scale": parse_bool(form.get("auto_height_scale")),
+        "auto_height_ratio": float(form.get("auto_height_ratio", "0.12")),
         "rotation_x": float(form.get("rotation_x", "0")),
         "rotation_y": float(form.get("rotation_y", "0")),
         "rotation_z": float(form.get("rotation_z", "0")),
         "world_strength": float(form.get("world_strength", "0.85")),
         "key_light_energy": float(form.get("key_light_energy", "3500")),
         "fill_light_energy": float(form.get("fill_light_energy", "1.8")),
+        "shading": form.get("shading", "smooth"),
+        "material_preset": form.get("material_preset", "custom"),
         "material_color": form.get("material_color", "#c7d3e5"),
         "material_roughness": float(form.get("material_roughness", "0.38")),
         "material_metallic": float(form.get("material_metallic", "0.08")),
@@ -224,7 +223,26 @@ def normalize_options(form):
         "transparent_background": parse_bool(form.get("transparent_background")),
     }
 
-    if render_enabled and render_options["render_source"] not in options["export_obj"]:
+    if render_options["height_scale"] <= 0:
+        raise ValueError("Height scale must be greater than 0")
+    if render_options["auto_height_ratio"] <= 0:
+        raise ValueError("Auto height ratio must be greater than 0")
+    return render_options
+
+
+def normalize_options(form):
+    export_maps = [value for value in form.getlist("export_obj") if value in AVAILABLE_EXPORT_MAPS]
+    options = {
+        "resolution_factor": int(form.get("resolution_factor", "1")),
+        "interpolate": form.get("interpolate", "bilinear"),
+        "stats_only": parse_bool(form.get("stats_only")),
+        "bounds": parse_bounds(form),
+        "export_obj": export_maps,
+    }
+
+    render_options = normalize_render_options(form)
+
+    if render_options["enabled"] and render_options["render_source"] not in options["export_obj"]:
         options["export_obj"] = list(dict.fromkeys(options["export_obj"] + [render_options["render_source"]]))
 
     return options, render_options
@@ -245,6 +263,53 @@ def summarize_stats(stats):
         "Rz",
     ]
     return {key: stats.get(key) for key in keys}
+
+
+def build_analysis_artifacts(job_id, result):
+    artifacts = []
+    if result["artifacts"]["statistics_txt"]:
+        artifacts.append(
+            manager.serialize_artifact(job_id, result["artifacts"]["statistics_txt"], "Statistics report (TXT)", "stats")
+        )
+    if result["artifacts"]["statistics_csv"]:
+        artifacts.append(
+            manager.serialize_artifact(job_id, result["artifacts"]["statistics_csv"], "Statistics CSV", "stats")
+        )
+    if result["artifacts"]["analysis_png"]:
+        artifacts.append(
+            manager.serialize_artifact(job_id, result["artifacts"]["analysis_png"], "Analysis preview", "preview")
+        )
+    for label, path in result["artifacts"]["obj"].items():
+        artifacts.append(manager.serialize_artifact(job_id, path, f"{label} OBJ", "obj"))
+    return [artifact for artifact in artifacts if artifact]
+
+
+def available_obj_sources(job):
+    output_dir = Path(job["paths"]["output_dir"])
+    return [source for source in AVAILABLE_EXPORT_MAPS if any(output_dir.glob(f"*_{source}.obj"))]
+
+
+def find_obj_path(job, source_label):
+    output_dir = Path(job["paths"]["output_dir"])
+    matches = sorted(output_dir.glob(f"*_{source_label}.obj"))
+    return matches[0] if matches else None
+
+
+def without_artifact_category(artifacts, category):
+    return [artifact for artifact in artifacts if artifact.get("category") != category]
+
+
+def cleanup_old_render_outputs(job, keep_path):
+    output_dir = Path(job["paths"]["output_dir"])
+    keep_path = Path(keep_path)
+    for path in sorted(output_dir.glob("*_render.*")):
+        if path == keep_path:
+            continue
+        path.unlink(missing_ok=True)
+
+
+def render_artifact_label(source_label):
+    return f"Rendered image ({source_label})"
 
 
 def build_blender_command(input_obj, output_image, render_options):
@@ -277,6 +342,10 @@ def build_blender_command(input_obj, output_image, render_options):
         str(render_options["camera_elevation"]),
         "--camera-lens",
         str(render_options["camera_lens"]),
+        "--height-scale",
+        str(render_options["height_scale"]),
+        "--auto-height-ratio",
+        str(render_options["auto_height_ratio"]),
         "--rotation-x",
         str(render_options["rotation_x"]),
         "--rotation-y",
@@ -289,6 +358,10 @@ def build_blender_command(input_obj, output_image, render_options):
         str(render_options["key_light_energy"]),
         "--fill-light-energy",
         str(render_options["fill_light_energy"]),
+        "--shading",
+        render_options["shading"],
+        "--material-preset",
+        render_options["material_preset"],
         "--material-color",
         render_options["material_color"],
         "--material-roughness",
@@ -297,7 +370,9 @@ def build_blender_command(input_obj, output_image, render_options):
         str(render_options["material_metallic"]),
         "--material-specular",
         str(render_options["material_specular"]),
-    ] + (["--transparent-background"] if render_options["transparent_background"] else [])
+    ] + (["--auto-height-scale"] if render_options["auto_height_scale"] else []) + (
+        ["--transparent-background"] if render_options["transparent_background"] else []
+    )
 
 
 def run_blender_render(job_id, input_obj, output_dir, render_options):
@@ -315,18 +390,102 @@ def run_blender_render(job_id, input_obj, output_dir, render_options):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        env={
+            **os.environ,
+            "LIBGL_ALWAYS_SOFTWARE": os.environ.get("LIBGL_ALWAYS_SOFTWARE", "1"),
+        },
     )
     assert process.stdout is not None
+    deferred_lines = []
     for line in process.stdout:
         line = line.strip()
         if line:
-            manager.append_log(job_id, line)
+            if line in BENIGN_WORKBENCH_LINES:
+                deferred_lines.append(line)
+            else:
+                manager.append_log(job_id, line)
 
     return_code = process.wait()
     if return_code != 0:
+        for line in deferred_lines:
+            manager.append_log(job_id, line)
         raise RuntimeError(f"Blender render failed with exit code {return_code}")
 
     return output_path
+
+
+def process_rerender(job_id, render_options):
+    job = manager.get(job_id)
+    if not job:
+        return
+
+    source_label = render_options["render_source"]
+    input_obj = find_obj_path(job, source_label)
+    if not input_obj:
+        available_sources = ", ".join(available_obj_sources(job)) or "none"
+        message = (
+            f"Requested render source '{source_label}' is not available for this job. "
+            f"Available OBJ sources: {available_sources}."
+        )
+        manager.append_log(job_id, message)
+        manager.update(
+            job_id,
+            status="failed",
+            stage="failed",
+            message=message,
+            error=message,
+            finished_at=time.time(),
+            render_options=render_options,
+        )
+        return
+
+    manager.update(
+        job_id,
+        status="running",
+        stage="rerendering",
+        message=f"Rerendering existing {source_label} OBJ",
+        progress=88.0,
+        error=None,
+        finished_at=None,
+        render_options=render_options,
+    )
+    manager.append_log(job_id, f"Render-only rerun queued using existing OBJ: {input_obj.name}")
+
+    try:
+        output_dir = Path(job["paths"]["output_dir"])
+        render_output = run_blender_render(job_id, input_obj, output_dir, render_options)
+        cleanup_old_render_outputs(job, render_output)
+
+        latest_job = manager.get(job_id) or job
+        artifacts = without_artifact_category(latest_job.get("artifacts", []), "render")
+        artifacts.append(
+            manager.serialize_artifact(job_id, render_output, render_artifact_label(source_label), "render")
+        )
+        artifacts = [artifact for artifact in artifacts if artifact]
+
+        manager.append_log(job_id, "Render-only rerun complete.")
+        manager.update(
+            job_id,
+            status="completed",
+            stage="completed",
+            message="Render-only rerun finished",
+            progress=100.0,
+            finished_at=time.time(),
+            error=None,
+            artifacts=artifacts,
+            render_options=render_options,
+        )
+    except Exception as exc:
+        manager.append_log(job_id, traceback.format_exc())
+        manager.update(
+            job_id,
+            status="failed",
+            stage="failed",
+            message=str(exc),
+            error=str(exc),
+            finished_at=time.time(),
+            render_options=render_options,
+        )
 
 
 def process_job(job_id, input_path):
@@ -337,6 +496,8 @@ def process_job(job_id, input_path):
     manager.update(job_id, status="running", started_at=time.time(), stage="starting", message="Starting job")
     log_writer = JobLogWriter(lambda line: manager.append_log(job_id, line))
     output_dir = Path(job["paths"]["output_dir"])
+    result = None
+    artifacts = []
 
     def progress_callback(progress, stage, message):
         manager.update(job_id, progress=round(progress * 100, 1), stage=stage, message=message)
@@ -356,15 +517,13 @@ def process_job(job_id, input_path):
                 show_progress=False,
             )
 
-        artifacts = []
-        if result["artifacts"]["statistics_txt"]:
-            artifacts.append(manager.serialize_artifact(job_id, result["artifacts"]["statistics_txt"], "Statistics report (TXT)", "stats"))
-        if result["artifacts"]["statistics_csv"]:
-            artifacts.append(manager.serialize_artifact(job_id, result["artifacts"]["statistics_csv"], "Statistics CSV", "stats"))
-        if result["artifacts"]["analysis_png"]:
-            artifacts.append(manager.serialize_artifact(job_id, result["artifacts"]["analysis_png"], "Analysis preview", "preview"))
-        for label, path in result["artifacts"]["obj"].items():
-            artifacts.append(manager.serialize_artifact(job_id, path, f"{label} OBJ", "obj"))
+        artifacts = build_analysis_artifacts(job_id, result)
+        manager.update(
+            job_id,
+            stats=result["stats"],
+            metadata=result["metadata"],
+            artifacts=artifacts,
+        )
 
         render_output = None
         if job["render_options"]["enabled"]:
@@ -373,7 +532,9 @@ def process_job(job_id, input_path):
             if not input_obj:
                 raise RuntimeError(f"Requested render source '{source_label}' was not generated")
             render_output = run_blender_render(job_id, input_obj, output_dir, job["render_options"])
-            artifacts.append(manager.serialize_artifact(job_id, render_output, "Rendered image", "render"))
+            artifacts.append(
+                manager.serialize_artifact(job_id, render_output, render_artifact_label(source_label), "render")
+            )
 
         artifacts = [artifact for artifact in artifacts if artifact]
         manager.update(
@@ -396,6 +557,9 @@ def process_job(job_id, input_path):
             message=str(exc),
             error=str(exc),
             finished_at=time.time(),
+            stats=result["stats"] if result else None,
+            metadata=result["metadata"] if result else None,
+            artifacts=artifacts,
         )
 
 
@@ -404,6 +568,10 @@ def job_payload(job):
         return None
     payload = dict(job)
     payload["stats_summary"] = summarize_stats(job.get("stats"))
+    payload["available_obj_sources"] = available_obj_sources(job)
+    payload["rerender_ready"] = (
+        payload["status"] not in {"queued", "running"} and bool(payload["available_obj_sources"])
+    )
     return payload
 
 
@@ -470,6 +638,45 @@ def create_job():
 
     manager.submit(process_job, job["id"], input_path)
     return jsonify({"job": job_payload(manager.get(job["id"]))}), 202
+
+
+@app.post("/api/jobs/<job_id>/rerender")
+def rerender_job(job_id):
+    job = manager.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    if job["status"] in {"queued", "running"}:
+        return jsonify({"error": "Wait for the current job activity to finish before rerendering."}), 409
+    if not blender_available():
+        return jsonify({"error": "Blender rendering is not available on this server."}), 400
+
+    try:
+        render_options = normalize_render_options(request.form, enabled=True)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    if not find_obj_path(job, render_options["render_source"]):
+        available_sources = ", ".join(available_obj_sources(job)) or "none"
+        return jsonify(
+            {
+                "error": (
+                    f"Selected job does not contain an OBJ for '{render_options['render_source']}'. "
+                    f"Available OBJ sources: {available_sources}."
+                )
+            }
+        ), 400
+
+    manager.submit(process_rerender, job_id, render_options)
+    manager.update(
+        job_id,
+        status="queued",
+        stage="queued",
+        message=f"Queued render-only rerun for {render_options['render_source']}",
+        progress=87.0,
+        error=None,
+        render_options=render_options,
+    )
+    return jsonify({"job": job_payload(manager.get(job_id))}), 202
 
 
 @app.get("/api/jobs/<job_id>")

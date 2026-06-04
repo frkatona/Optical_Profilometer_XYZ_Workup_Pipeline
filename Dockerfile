@@ -18,12 +18,13 @@ FROM python:3.13-slim AS blender-renderer
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    LIBGL_ALWAYS_SOFTWARE=1
 
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends blender && \
+    apt-get install -y --no-install-recommends blender libegl1 libgl1 && \
     rm -rf /var/lib/apt/lists/*
 
 COPY blender/render_obj.py /app/blender/render_obj.py
@@ -40,13 +41,14 @@ FROM analysis-base AS web-ui
 
 ENV WEBUI_DATA_DIR=/app/webui_data \
     WEBUI_HOST=0.0.0.0 \
-    WEBUI_PORT=8000
+    WEBUI_PORT=8000 \
+    LIBGL_ALWAYS_SOFTWARE=1
 
 COPY requirements-web.txt .
 RUN pip install --no-cache-dir -r requirements-web.txt
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends blender && \
+    apt-get install -y --no-install-recommends blender libegl1 libgl1 && \
     rm -rf /var/lib/apt/lists/*
 
 COPY blender /app/blender

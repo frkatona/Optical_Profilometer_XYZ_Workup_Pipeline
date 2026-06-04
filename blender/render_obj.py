@@ -6,6 +6,34 @@ from pathlib import Path
 import bpy
 from mathutils import Vector
 
+MATERIAL_PRESETS = {
+    "custom": None,
+    "technical_clay": {
+        "color": "#c7d3e5",
+        "roughness": 0.38,
+        "metallic": 0.08,
+        "specular": 0.55,
+    },
+    "lab_ceramic": {
+        "color": "#f4f7fb",
+        "roughness": 0.22,
+        "metallic": 0.0,
+        "specular": 0.6,
+    },
+    "brushed_aluminum": {
+        "color": "#c9d0db",
+        "roughness": 0.24,
+        "metallic": 0.72,
+        "specular": 0.52,
+    },
+    "graphite_matte": {
+        "color": "#556272",
+        "roughness": 0.7,
+        "metallic": 0.12,
+        "specular": 0.35,
+    },
+}
+
 
 def parse_args():
     argv = sys.argv
@@ -49,13 +77,13 @@ def parse_args():
         "--camera-azimuth",
         type=float,
         default=35.0,
-        help="Camera azimuth angle in degrees around the XZ plane",
+        help="Camera azimuth angle in degrees around the XY plane",
     )
     parser.add_argument(
         "--camera-elevation",
         type=float,
         default=32.0,
-        help="Camera elevation angle in degrees above the XZ plane",
+        help="Camera elevation angle in degrees above the XY plane",
     )
     parser.add_argument(
         "--camera-lens",
@@ -82,6 +110,23 @@ def parse_args():
         help="Rotate the imported object around Z in degrees",
     )
     parser.add_argument(
+        "--height-scale",
+        type=float,
+        default=1.0,
+        help="Scale the imported surface height along its local height axis",
+    )
+    parser.add_argument(
+        "--auto-height-scale",
+        action="store_true",
+        help="Automatically scale relief to a target fraction of the lateral span",
+    )
+    parser.add_argument(
+        "--auto-height-ratio",
+        type=float,
+        default=0.12,
+        help="Target height-to-span ratio used when auto height scaling is enabled",
+    )
+    parser.add_argument(
         "--world-strength",
         type=float,
         default=0.85,
@@ -105,6 +150,12 @@ def parse_args():
         help="Base material color as a hex string, for example #c7d3e5",
     )
     parser.add_argument(
+        "--material-preset",
+        default="custom",
+        choices=sorted(MATERIAL_PRESETS),
+        help="Named material preset to use instead of the manual material values",
+    )
+    parser.add_argument(
         "--material-roughness",
         type=float,
         default=0.38,
@@ -126,6 +177,12 @@ def parse_args():
         "--transparent-background",
         action="store_true",
         help="Render with a transparent film background",
+    )
+    parser.add_argument(
+        "--shading",
+        default="smooth",
+        choices=["smooth", "flat"],
+        help="Shading mode for the imported surface",
     )
     return parser.parse_args(argv)
 
@@ -159,19 +216,50 @@ def join_mesh_objects(mesh_objects):
     return bpy.context.view_layer.objects.active
 
 
-def smooth_object(obj):
+def apply_shading(obj, args):
     bpy.ops.object.select_all(action="DESELECT")
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.shade_smooth()
+    if args.shading == "smooth":
+        bpy.ops.object.shade_smooth()
+    else:
+        bpy.ops.object.shade_flat()
 
 
 def rotate_object(obj, args):
+    import_rotation = obj.rotation_euler.copy()
     obj.rotation_euler = (
-        math.radians(args.rotation_x),
-        math.radians(args.rotation_y),
-        math.radians(args.rotation_z),
+        import_rotation.x + math.radians(args.rotation_x),
+        import_rotation.y + math.radians(args.rotation_y),
+        import_rotation.z + math.radians(args.rotation_z),
     )
+
+
+def apply_height_scale(obj, args):
+    if args.height_scale <= 0:
+        raise ValueError("Height scale must be greater than 0")
+    scale_factor = args.height_scale
+
+    if args.auto_height_scale:
+        if args.auto_height_ratio <= 0:
+            raise ValueError("Auto height ratio must be greater than 0")
+        size = obj.dimensions.copy()
+        lateral_span = max(size.x, size.z, 1e-6)
+        height_span = size.y
+        if height_span <= 1e-9:
+            print("Auto height scaling skipped: imported surface has no measurable height span")
+        else:
+            auto_scale = (lateral_span * args.auto_height_ratio) / height_span
+            scale_factor *= auto_scale
+            print(
+                "Auto height scaling enabled:"
+                f" target ratio={args.auto_height_ratio:.3f},"
+                f" computed factor={auto_scale:.3f}x"
+            )
+
+    obj.scale.y *= scale_factor
+    if abs(scale_factor - 1.0) > 1e-9:
+        print(f"Applied final height scale: {scale_factor:.3f}x")
 
 
 def object_bounds(obj):
@@ -195,7 +283,7 @@ def object_bounds(obj):
     return min_corner, max_corner, center, size
 
 
-def look_at(obj, target, track_axis="-Z", up_axis="Y"):
+def look_at(obj, target, track_axis="-Z", up_axis="Z"):
     direction = target - obj.location
     obj.rotation_euler = direction.to_track_quat(track_axis, up_axis).to_euler()
 
@@ -210,19 +298,32 @@ def hex_to_rgba(value):
     return (r, g, b, 1.0)
 
 
+def material_settings(args):
+    preset = MATERIAL_PRESETS.get(args.material_preset)
+    if preset is None:
+        return {
+            "color": args.material_color,
+            "roughness": args.material_roughness,
+            "metallic": args.material_metallic,
+            "specular": args.material_specular,
+        }
+    return preset
+
+
 def create_material(args):
+    settings = material_settings(args)
     material = bpy.data.materials.new(name="ProfilometrySurface")
     material.use_nodes = True
     nodes = material.node_tree.nodes
     principled = nodes.get("Principled BSDF")
     if principled is not None:
-        principled.inputs["Base Color"].default_value = hex_to_rgba(args.material_color)
-        principled.inputs["Roughness"].default_value = args.material_roughness
-        principled.inputs["Metallic"].default_value = args.material_metallic
+        principled.inputs["Base Color"].default_value = hex_to_rgba(settings["color"])
+        principled.inputs["Roughness"].default_value = settings["roughness"]
+        principled.inputs["Metallic"].default_value = settings["metallic"]
         if "Specular IOR Level" in principled.inputs:
-            principled.inputs["Specular IOR Level"].default_value = args.material_specular
+            principled.inputs["Specular IOR Level"].default_value = settings["specular"]
         elif "Specular" in principled.inputs:
-            principled.inputs["Specular"].default_value = args.material_specular
+            principled.inputs["Specular"].default_value = settings["specular"]
     return material
 
 
@@ -275,8 +376,8 @@ def setup_camera(center, size, args):
     camera.location = Vector(
         (
             center.x + radius * math.cos(elevation) * math.cos(azimuth),
-            center.y + radius * math.sin(elevation),
-            center.z + radius * math.cos(elevation) * math.sin(azimuth),
+            center.y + radius * math.cos(elevation) * math.sin(azimuth),
+            center.z + radius * math.sin(elevation),
         )
     )
     camera.data.lens = args.camera_lens
@@ -287,22 +388,34 @@ def setup_camera(center, size, args):
 
 
 def setup_lights(center, size, args):
-    span = max(size.x, size.z, 1.0)
-    height = max(size.y, 0.1)
+    span = max(size.x, size.y, 1.0)
+    height = max(size.z, 0.1)
 
     key_data = bpy.data.lights.new(name="KeyLight", type="AREA")
     key_data.energy = args.key_light_energy
     key_data.shape = "RECTANGLE"
     key_data.size = span * 1.5
     key = bpy.data.objects.new("KeyLight", key_data)
-    key.location = Vector((center.x + span * 0.3, center.y + height * 3.0 + 1.0, center.z - span * 0.6))
+    key.location = Vector(
+        (
+            center.x + span * 0.3,
+            center.y - span * 0.6,
+            center.z + height * 3.0 + 1.0,
+        )
+    )
     bpy.context.scene.collection.objects.link(key)
     look_at(key, center)
 
     fill_data = bpy.data.lights.new(name="FillLight", type="SUN")
     fill_data.energy = args.fill_light_energy
     fill = bpy.data.objects.new("FillLight", fill_data)
-    fill.location = Vector((center.x - span, center.y + height * 2.0 + 1.0, center.z + span))
+    fill.location = Vector(
+        (
+            center.x - span,
+            center.y + span,
+            center.z + height * 2.0 + 1.0,
+        )
+    )
     bpy.context.scene.collection.objects.link(fill)
     look_at(fill, center)
 
@@ -362,7 +475,8 @@ def main():
     reset_scene()
     imported = import_obj(input_path)
     obj = join_mesh_objects(imported)
-    smooth_object(obj)
+    apply_shading(obj, args)
+    apply_height_scale(obj, args)
     rotate_object(obj, args)
 
     material = create_material(args)
