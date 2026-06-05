@@ -217,8 +217,8 @@
                 <div class="form-grid compact">
                   <label><span>Distance scale</span><input type="number" step="any" name="camera_distance_scale" value="2.1"></label>
                   <label><span>Azimuth</span><input type="number" step="any" name="camera_azimuth" value="35"></label>
-                  <label><span>Elevation</span><input type="number" step="any" name="camera_elevation" value="32"></label>
-                  <label><span>Lens</span><input type="number" step="any" name="camera_lens" value="55"></label>
+                  <label><span>Elevation</span><input type="number" step="any" name="camera_elevation" value="55"></label>
+                  <label><span>Lens</span><input type="number" step="any" name="camera_lens" value="75"></label>
                 </div>
               </div>
 
@@ -229,11 +229,52 @@
                   <span>Auto fit relief to a target fraction of the lateral span</span>
                 </label>
                 <div class="form-grid compact">
-                  <label><span>Height scale</span><input type="number" min="0.01" step="any" name="height_scale" value="1.0"></label>
+                  <label><span>Height scale</span><input type="number" min="0.01" step="any" name="height_scale" value="150"></label>
                   <label><span>Target relief ratio</span><input type="number" min="0.01" step="any" name="auto_height_ratio" value="0.12"></label>
-                  <label><span>Rotate X</span><input type="number" step="any" name="rotation_x" value="0"></label>
-                  <label><span>Rotate Y</span><input type="number" step="any" name="rotation_y" value="0"></label>
-                  <label><span>Rotate Z</span><input type="number" step="any" name="rotation_z" value="0"></label>
+                  <label><span>Rotate X</span><input type="number" step="any" name="rotation_x" value="-10"></label>
+                  <label><span>Rotate Y</span><input type="number" step="any" name="rotation_y" value="-80"></label>
+                  <label><span>Rotate Z</span><input type="number" step="any" name="rotation_z" value="-90"></label>
+                </div>
+              </div>
+
+              <div class="subsection render-preview-section">
+                <div class="render-preview-header">
+                  <div>
+                    <h3>Live render preview</h3>
+                    <p>Crude orientation guide driven by the current camera, height, and rotation fields.</p>
+                  </div>
+                  <div class="render-preview-tools">
+                    <span class="status-badge neutral">Approximate</span>
+                    <button type="button" class="panel-collapse" id="open-render-preview-modal">Open preview</button>
+                  </div>
+                </div>
+
+                <div class="render-preview-grid">
+                  <section class="render-preview-card render-preview-main-card">
+                    <div class="render-preview-card-head">
+                      <strong>Render direction</strong>
+                      <span id="render-preview-caption" class="muted">Camera preview updates as you edit the fields.</span>
+                    </div>
+                    <svg id="render-preview-main" class="render-preview-svg" viewBox="0 0 420 260" aria-label="Render preview diagram"></svg>
+                  </section>
+
+                  <section class="render-preview-card">
+                    <div class="render-preview-card-head">
+                      <strong>Plan + side views</strong>
+                      <span id="render-preview-note" class="muted">Top and side diagrams show the camera position relative to the object.</span>
+                    </div>
+                    <div class="render-preview-mini-grid">
+                      <div class="render-preview-mini-card">
+                        <span>Plan</span>
+                        <svg id="render-preview-plan" class="render-preview-svg mini" viewBox="0 0 180 160" aria-label="Top-down preview diagram"></svg>
+                      </div>
+                      <div class="render-preview-mini-card">
+                        <span>Side</span>
+                        <svg id="render-preview-side" class="render-preview-svg mini" viewBox="0 0 180 160" aria-label="Side elevation preview diagram"></svg>
+                      </div>
+                    </div>
+                    <div id="render-preview-readout" class="render-preview-readout"></div>
+                  </section>
                 </div>
               </div>
 
@@ -339,6 +380,113 @@
       </div>
       <div class="image-modal-frame">
         <img id="image-modal-image" src="" alt="">
+      </div>
+    </div>
+  </div>
+  <div id="render-preview-modal" class="image-modal is-hidden" aria-hidden="true">
+    <div class="image-modal-backdrop" data-render-preview-close></div>
+    <div class="image-modal-dialog render-preview-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="render-preview-modal-title">
+      <div class="image-modal-bar render-preview-modal-bar">
+        <div>
+          <strong id="render-preview-modal-title">Render preview</strong>
+          <div id="render-preview-modal-caption" class="muted">Large preview of the current camera and object orientation.</div>
+        </div>
+        <div class="image-modal-actions">
+          <button type="button" class="panel-collapse" id="render-preview-modal-close">Close</button>
+        </div>
+      </div>
+      <div class="render-preview-modal-body">
+        <div class="render-preview-modal-grid">
+          <section class="render-preview-card render-preview-main-card render-preview-modal-main-card">
+            <div class="render-preview-card-head">
+              <strong>Render direction</strong>
+              <span id="render-preview-modal-note" class="muted">Camera preview updates as you edit the fields.</span>
+            </div>
+            <svg id="render-preview-modal-main" class="render-preview-svg render-preview-svg-modal" viewBox="0 0 820 500" aria-label="Expanded render preview diagram"></svg>
+          </section>
+
+          <section class="render-preview-card render-preview-modal-side-card">
+            <div class="render-preview-card-head">
+              <strong>Plan + side views</strong>
+              <span class="muted">Top and side diagrams mirror the current render settings.</span>
+            </div>
+            <div class="render-preview-mini-grid render-preview-mini-grid-modal">
+              <div class="render-preview-mini-card">
+                <span>Plan</span>
+                <svg id="render-preview-modal-plan" class="render-preview-svg mini render-preview-svg-modal-mini" viewBox="0 0 260 220" aria-label="Expanded top-down preview diagram"></svg>
+              </div>
+              <div class="render-preview-mini-card">
+                <span>Side</span>
+                <svg id="render-preview-modal-side" class="render-preview-svg mini render-preview-svg-modal-mini" viewBox="0 0 260 220" aria-label="Expanded side elevation preview diagram"></svg>
+              </div>
+            </div>
+            <div id="render-preview-modal-readout" class="render-preview-readout"></div>
+            <div class="render-preview-modal-controls">
+              <div class="render-preview-card-head">
+                <strong>Adjust in preview</strong>
+                <span class="muted">These controls write back to the live Blender fields.</span>
+              </div>
+              <div class="preview-control-groups">
+                <section class="preview-control-group">
+                  <h4>Camera</h4>
+                  <label class="preview-control-row">
+                    <span>Azimuth</span>
+                    <input type="range" min="-180" max="180" step="1" data-preview-proxy="camera_azimuth">
+                    <output data-preview-output-for="camera_azimuth">35 deg</output>
+                  </label>
+                  <label class="preview-control-row">
+                    <span>Elevation</span>
+                    <input type="range" min="5" max="89" step="1" data-preview-proxy="camera_elevation">
+                    <output data-preview-output-for="camera_elevation">55 deg</output>
+                  </label>
+                  <label class="preview-control-row">
+                    <span>Distance</span>
+                    <input type="range" min="0.9" max="5.5" step="0.05" data-preview-proxy="camera_distance_scale">
+                    <output data-preview-output-for="camera_distance_scale">2.10x</output>
+                  </label>
+                  <label class="preview-control-row">
+                    <span>Lens</span>
+                    <input type="range" min="12" max="200" step="1" data-preview-proxy="camera_lens">
+                    <output data-preview-output-for="camera_lens">75 mm</output>
+                  </label>
+                </section>
+
+                <section class="preview-control-group">
+                  <h4>Object</h4>
+                  <label class="preview-control-row">
+                    <span>Height scale</span>
+                    <input type="range" min="0.1" max="500" step="0.5" data-preview-proxy="height_scale">
+                    <output data-preview-output-for="height_scale">150.00x</output>
+                  </label>
+                  <label class="preview-toggle-row">
+                    <input type="checkbox" data-preview-proxy="auto_height_scale">
+                    <span>Auto fit relief</span>
+                  </label>
+                  <label class="preview-control-row">
+                    <span>Target relief</span>
+                    <input type="range" min="0.01" max="0.8" step="0.01" data-preview-proxy="auto_height_ratio">
+                    <output data-preview-output-for="auto_height_ratio">0.12 span</output>
+                  </label>
+                  <label class="preview-control-row">
+                    <span>Rotate X</span>
+                    <input type="range" min="-180" max="180" step="1" data-preview-proxy="rotation_x">
+                    <output data-preview-output-for="rotation_x">-10 deg</output>
+                  </label>
+                  <label class="preview-control-row">
+                    <span>Rotate Y</span>
+                    <input type="range" min="-180" max="180" step="1" data-preview-proxy="rotation_y">
+                    <output data-preview-output-for="rotation_y">-80 deg</output>
+                  </label>
+                  <label class="preview-control-row">
+                    <span>Rotate Z</span>
+                    <input type="range" min="-180" max="180" step="1" data-preview-proxy="rotation_z">
+                    <output data-preview-output-for="rotation_z">-90 deg</output>
+                  </label>
+                </section>
+              </div>
+            </div>
+          </section>
+        </div>
       </div>
     </div>
   </div>

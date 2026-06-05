@@ -82,37 +82,37 @@ def parse_args():
     parser.add_argument(
         "--camera-elevation",
         type=float,
-        default=32.0,
+        default=55.0,
         help="Camera elevation angle in degrees above the XY plane",
     )
     parser.add_argument(
         "--camera-lens",
         type=float,
-        default=55.0,
+        default=75.0,
         help="Camera lens length in millimeters",
     )
     parser.add_argument(
         "--rotation-x",
         type=float,
-        default=0.0,
+        default=-10.0,
         help="Rotate the imported object around X in degrees",
     )
     parser.add_argument(
         "--rotation-y",
         type=float,
-        default=0.0,
+        default=-80.0,
         help="Rotate the imported object around Y in degrees",
     )
     parser.add_argument(
         "--rotation-z",
         type=float,
-        default=0.0,
+        default=-90.0,
         help="Rotate the imported object around Z in degrees",
     )
     parser.add_argument(
         "--height-scale",
         type=float,
-        default=1.0,
+        default=150.0,
         help="Scale the imported surface height along its local height axis",
     )
     parser.add_argument(
@@ -214,6 +214,30 @@ def join_mesh_objects(mesh_objects):
     bpy.context.view_layer.objects.active = mesh_objects[0]
     bpy.ops.object.join()
     return bpy.context.view_layer.objects.active
+
+
+def ensure_surface_normals_face_up(obj):
+    mesh = obj.data
+    if not mesh.polygons:
+        return
+
+    average_normal = Vector((0.0, 0.0, 0.0))
+    total_area = 0.0
+    for polygon in mesh.polygons:
+        weight = polygon.area or 1.0
+        average_normal += polygon.normal * weight
+        total_area += weight
+
+    if total_area <= 0.0:
+        return
+
+    average_normal /= total_area
+    if average_normal.y >= 0:
+        return
+
+    mesh.flip_normals()
+    mesh.update()
+    print("Flipped imported surface normals to face the positive local height axis")
 
 
 def apply_shading(obj, args):
@@ -475,6 +499,7 @@ def main():
     reset_scene()
     imported = import_obj(input_path)
     obj = join_mesh_objects(imported)
+    ensure_surface_normals_face_up(obj)
     apply_shading(obj, args)
     apply_height_scale(obj, args)
     rotate_object(obj, args)

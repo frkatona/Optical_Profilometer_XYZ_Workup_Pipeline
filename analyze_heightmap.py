@@ -236,9 +236,9 @@ def export_heightmap_to_obj(heightmap, pixel_spacing_um, output_path, label='hei
                 v3 = (y + 1) * width + x + 1
                 v4 = (y + 1) * width + (x + 1) + 1
                 
-                # Create two triangles for each quad
-                f.write(f"f {v1} {v2} {v3}\n")
-                f.write(f"f {v2} {v4} {v3}\n")
+                # Wind triangles so the surface normal points toward positive height.
+                f.write(f"f {v1} {v3} {v2}\n")
+                f.write(f"f {v2} {v3} {v4}\n")
     
     export_time = time.time() - start_time
     file_size_mb = output_path.stat().st_size / (1024 * 1024)

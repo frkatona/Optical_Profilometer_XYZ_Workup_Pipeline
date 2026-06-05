@@ -140,15 +140,16 @@ class JobManager:
         if not path.exists():
             return None
         suffix = path.suffix.lower()
+        version_token = str(path.stat().st_mtime_ns)
         preview_url = None
         if suffix in IMAGE_SUFFIXES:
-            preview_url = f"/api/jobs/{job_id}/artifacts/{path.name}?download=0"
+            preview_url = f"/api/jobs/{job_id}/artifacts/{path.name}?download=0&v={version_token}"
         return {
             "name": path.name,
             "label": label,
             "category": category,
             "size_bytes": path.stat().st_size,
-            "download_url": f"/api/jobs/{job_id}/artifacts/{path.name}?download=1",
+            "download_url": f"/api/jobs/{job_id}/artifacts/{path.name}?download=1&v={version_token}",
             "preview_url": preview_url,
         }
 
@@ -203,14 +204,14 @@ def normalize_render_options(form, enabled=None):
         "samples": int(form.get("render_samples", "64")),
         "camera_distance_scale": float(form.get("camera_distance_scale", "2.1")),
         "camera_azimuth": float(form.get("camera_azimuth", "35")),
-        "camera_elevation": float(form.get("camera_elevation", "32")),
-        "camera_lens": float(form.get("camera_lens", "55")),
-        "height_scale": float(form.get("height_scale", "1.0")),
+        "camera_elevation": float(form.get("camera_elevation", "55")),
+        "camera_lens": float(form.get("camera_lens", "75")),
+        "height_scale": float(form.get("height_scale", "150")),
         "auto_height_scale": parse_bool(form.get("auto_height_scale")),
         "auto_height_ratio": float(form.get("auto_height_ratio", "0.12")),
-        "rotation_x": float(form.get("rotation_x", "0")),
-        "rotation_y": float(form.get("rotation_y", "0")),
-        "rotation_z": float(form.get("rotation_z", "0")),
+        "rotation_x": float(form.get("rotation_x", "-10")),
+        "rotation_y": float(form.get("rotation_y", "-80")),
+        "rotation_z": float(form.get("rotation_z", "-90")),
         "world_strength": float(form.get("world_strength", "0.85")),
         "key_light_energy": float(form.get("key_light_energy", "3500")),
         "fill_light_energy": float(form.get("fill_light_energy", "1.8")),
