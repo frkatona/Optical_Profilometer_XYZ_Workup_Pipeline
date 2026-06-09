@@ -1,4 +1,5 @@
 import argparse
+import base64
 import io
 import os
 import shutil
@@ -14,6 +15,9 @@ from pathlib import Path
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 from flask import Flask, abort, jsonify, render_template, request, send_file
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from matplotlib.figure import Figure
+import numpy as np
 from werkzeug.utils import secure_filename
 
 from analyze_heightmap import run_analysis_pipeline
@@ -37,8 +41,112 @@ def blender_available():
     return blender_executable() is not None
 
 
-def sample_available():
-    return (APP_ROOT / "test.xyz").exists()
+def read_xyz_dimensions(filepath):
+    header_lines = []
+    with open(filepath, "r", encoding="utf-8", errors="replace") as handle:
+        for _ in range(14):
+            header_lines.append(handle.readline().strip())
+
+    try:
+        dim_parts = header_lines[3].split()
+        width = int(dim_parts[2])
+        height = int(dim_parts[3])
+    except (IndexError, ValueError) as exc:
+        raise ValueError("Could not parse XYZ dimensions from header line 4.") from exc
+
+    if width <= 0 or height <= 0:
+        raise ValueError("XYZ dimensions must be positive.")
+
+    return width, height
+
+
+def preview_resolution_factor(width, height):
+    for factor in (64, 32, 16, 8, 4, 2):
+        if width // factor >= 24 and height // factor >= 24:
+            return factor
+    return 1
+
+
+def load_xyz_preview(filepath):
+    width, height = read_xyz_dimensions(filepath)
+    factor = preview_resolution_factor(width, height)
+    preview_width = max(1, (width + factor - 1) // factor)
+    preview_height = max(1, (height + factor - 1) // factor)
+    sums = np.zeros((preview_height, preview_width), dtype=float)
+    counts = np.zeros((preview_height, preview_width), dtype=np.uint32)
+
+    with open(filepath, "r", encoding="utf-8", errors="replace") as handle:
+        for _ in range(14):
+            handle.readline()
+
+        for line in handle:
+            parts = line.split()
+            if len(parts) < 3 or (parts[2] == "No" and len(parts) > 3 and parts[3] == "Data"):
+                continue
+            try:
+                x = int(parts[0])
+                y = int(parts[1])
+                z = float(parts[2])
+            except ValueError:
+                continue
+
+            preview_x = x // factor
+            preview_y = y // factor
+            if 0 <= preview_x < preview_width and 0 <= preview_y < preview_height:
+                sums[preview_y, preview_x] += z
+                counts[preview_y, preview_x] += 1
+
+    data = np.full((preview_height, preview_width), np.nan, dtype=float)
+    np.divide(sums, counts, out=data, where=counts > 0)
+    return data, {
+        "width": width,
+        "height": height,
+        "preview_width": preview_width,
+        "preview_height": preview_height,
+        "resolution_factor": factor,
+        "sampled_points": int(counts.sum()),
+    }
+
+
+def render_preview_payload(filepath, filename):
+    data, metadata = load_xyz_preview(filepath)
+    finite = np.isfinite(data)
+    if not finite.any():
+        raise ValueError("The selected XYZ file did not contain any valid height values.")
+
+    values = data[finite]
+    vmin, vmax = np.percentile(values, [2, 98])
+    if not np.isfinite(vmin) or not np.isfinite(vmax) or vmin == vmax:
+        vmin = float(np.min(values))
+        vmax = float(np.max(values))
+        if vmin == vmax:
+            vmax = vmin + 1.0
+
+    fig = Figure(figsize=(3.1, 2.1), dpi=96)
+    fig.patch.set_facecolor("#f6f9fc")
+    axis = fig.subplots()
+    axis.imshow(data, cmap="viridis", interpolation="nearest", aspect="auto", vmin=vmin, vmax=vmax)
+    axis.set_axis_off()
+    fig.tight_layout(pad=0)
+
+    buffer = io.BytesIO()
+    FigureCanvas(fig).print_png(buffer)
+    image_data = base64.b64encode(buffer.getvalue()).decode("ascii")
+    coverage = float(np.count_nonzero(finite) / data.size * 100.0)
+
+    return {
+        "filename": filename,
+        "image_url": f"data:image/png;base64,{image_data}",
+        "width": metadata["width"],
+        "height": metadata["height"],
+        "preview_width": metadata["preview_width"],
+        "preview_height": metadata["preview_height"],
+        "resolution_factor": metadata["resolution_factor"],
+        "sampled_points": metadata["sampled_points"],
+        "coverage_percent": round(coverage, 1),
+        "z_min": float(np.min(values)),
+        "z_max": float(np.max(values)),
+    }
 
 
 class JobLogWriter(io.TextIOBase):
@@ -378,7 +486,7 @@ def build_blender_command(input_obj, output_image, render_options):
 
 def run_blender_render(job_id, input_obj, output_dir, render_options):
     if not blender_available():
-        raise RuntimeError("Blender is not available on this server. Use the web-ui Docker target or install Blender.")
+        raise RuntimeError("Blender is not available on this server. Use the blender Docker target or install Blender.")
 
     output_name = f"{Path(input_obj).stem}_render.{render_options['output_format']}"
     output_path = Path(output_dir) / output_name
@@ -581,7 +689,6 @@ def index():
     return render_template(
         "index.html",
         blender_available=blender_available(),
-        sample_available=sample_available(),
         max_workers=DEFAULT_MAX_WORKERS,
         export_maps=AVAILABLE_EXPORT_MAPS,
     )
@@ -592,11 +699,38 @@ def capabilities():
     return jsonify(
         {
             "blender_available": blender_available(),
-            "sample_available": sample_available(),
             "max_workers": DEFAULT_MAX_WORKERS,
             "export_maps": AVAILABLE_EXPORT_MAPS,
         }
     )
+
+
+@app.post("/api/preview")
+def preview_input_file():
+    upload = request.files.get("input_file")
+    if upload is None or not upload.filename:
+        return jsonify({"error": "Upload a .xyz file to preview."}), 400
+
+    filename = secure_filename(upload.filename) or "input.xyz"
+    if not filename.lower().endswith(".xyz"):
+        return jsonify({"error": "Preview requires a .xyz file."}), 400
+
+    preview_dir = DEFAULT_DATA_DIR / "previews"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    temp_path = preview_dir / f"{uuid.uuid4().hex}_{filename}"
+
+    try:
+        upload.save(temp_path)
+        preview = render_preview_payload(temp_path, filename)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception:
+        traceback.print_exc()
+        return jsonify({"error": "Could not render a preview for this XYZ file."}), 400
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+    return jsonify({"preview": preview})
 
 
 @app.get("/api/jobs")
@@ -606,11 +740,10 @@ def list_jobs():
 
 @app.post("/api/jobs")
 def create_job():
-    use_sample = parse_bool(request.form.get("use_bundled_sample"))
     upload = request.files.get("input_file")
 
-    if not use_sample and (upload is None or not upload.filename):
-        return jsonify({"error": "Upload a .xyz file or use the bundled sample file."}), 400
+    if upload is None or not upload.filename:
+        return jsonify({"error": "Upload a .xyz file."}), 400
 
     try:
         options, render_options = normalize_options(request.form)
@@ -620,22 +753,15 @@ def create_job():
     if render_options["enabled"] and not blender_available():
         return jsonify({"error": "Blender rendering is not available on this server."}), 400
 
-    source_name = "test.xyz" if use_sample else secure_filename(upload.filename)
+    source_name = secure_filename(upload.filename) or "input.xyz"
     job = manager.create_job(source_name, options, render_options)
 
     input_dir = Path(job["paths"]["input_dir"])
-    if use_sample:
-        sample_path = APP_ROOT / "test.xyz"
-        if not sample_path.exists():
-            return jsonify({"error": "Bundled sample test.xyz is not available on this server."}), 400
-        input_path = input_dir / sample_path.name
-        shutil.copy2(sample_path, input_path)
-    else:
-        filename = secure_filename(upload.filename) or "input.xyz"
-        if not filename.lower().endswith(".xyz"):
-            filename += ".xyz"
-        input_path = input_dir / filename
-        upload.save(input_path)
+    filename = secure_filename(upload.filename) or "input.xyz"
+    if not filename.lower().endswith(".xyz"):
+        filename += ".xyz"
+    input_path = input_dir / filename
+    upload.save(input_path)
 
     manager.submit(process_job, job["id"], input_path)
     return jsonify({"job": job_payload(manager.get(job["id"]))}), 202

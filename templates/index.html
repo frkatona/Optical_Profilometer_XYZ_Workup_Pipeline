@@ -118,10 +118,17 @@
                 <input type="file" name="input_file" accept=".xyz">
               </label>
 
-              <label class="checkbox">
-                <input type="checkbox" name="use_bundled_sample" {% if not sample_available %}disabled{% endif %}>
-                <span>Use bundled sample `test.xyz` {% if not sample_available %}(not available on this server){% endif %}</span>
-              </label>
+              <div class="file-preview-card" id="file-preview-card">
+                <div class="file-preview-meta">
+                  <span class="panel-kicker">Input preview</span>
+                  <strong id="file-preview-title">No file loaded</strong>
+                  <span id="file-preview-summary">Choose an XYZ file to render a lightweight heightmap preview here.</span>
+                </div>
+                <div class="file-preview-frame is-empty" id="file-preview-frame">
+                  <img id="file-preview-image" alt="Selected XYZ heightmap preview" hidden>
+                  <span id="file-preview-placeholder">Awaiting file</span>
+                </div>
+              </div>
 
               <label>
                 <span>Resolution factor</span>
@@ -178,6 +185,9 @@
                 <input type="checkbox" name="enable_render" {% if not blender_available %}disabled{% endif %}>
                 <span>Render an exported OBJ after analysis</span>
               </label>
+              {% if not blender_available %}
+              <p class="render-unavailable muted">This image was built without Blender. Build the Docker target named blender to enable rendering.</p>
+              {% endif %}
 
               <div class="form-grid render-controls">
                 <label>

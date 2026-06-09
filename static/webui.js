@@ -17,6 +17,7 @@ const state = {
     scrollTop: 0,
     stickToBottom: true,
   },
+  filePreviewToken: 0,
 };
 
 const renderOptionFieldMap = {
@@ -194,6 +195,95 @@ function setStatusMessage(message) {
   const status = document.getElementById("submit-status");
   if (status) {
     status.textContent = message || "";
+  }
+}
+
+function setFilePreviewState({ mode = "empty", title, summary, imageUrl, placeholder }) {
+  const card = document.getElementById("file-preview-card");
+  const frame = document.getElementById("file-preview-frame");
+  const image = document.getElementById("file-preview-image");
+  const placeholderNode = document.getElementById("file-preview-placeholder");
+  const titleNode = document.getElementById("file-preview-title");
+  const summaryNode = document.getElementById("file-preview-summary");
+
+  if (!card || !frame || !image || !placeholderNode || !titleNode || !summaryNode) return;
+
+  card.classList.toggle("is-error", mode === "error");
+  frame.classList.toggle("is-loading", mode === "loading");
+  frame.classList.toggle("is-empty", !imageUrl);
+
+  titleNode.textContent = title || "No file loaded";
+  summaryNode.textContent = summary || "Choose an XYZ file to render a lightweight heightmap preview here.";
+  placeholderNode.textContent = placeholder || (mode === "loading" ? "Rendering preview" : "Awaiting file");
+  placeholderNode.hidden = Boolean(imageUrl) || mode === "loading";
+
+  if (imageUrl) {
+    image.src = imageUrl;
+    image.hidden = false;
+  } else {
+    image.removeAttribute("src");
+    image.hidden = true;
+  }
+}
+
+function resetFilePreview() {
+  state.filePreviewToken += 1;
+  setFilePreviewState({
+    mode: "empty",
+    title: "No file loaded",
+    summary: "Choose an XYZ file to render a lightweight heightmap preview here.",
+    placeholder: "Awaiting file",
+  });
+}
+
+function describeFilePreview(preview) {
+  const sourceSize = `${preview.width} x ${preview.height}`;
+  const previewSize = `${preview.preview_width} x ${preview.preview_height}`;
+  return `${sourceSize} source, ${previewSize} preview, ${formatPercent(preview.coverage_percent)} coverage, ${preview.resolution_factor}x downsample.`;
+}
+
+async function previewSelectedFile() {
+  const input = document.querySelector('input[name="input_file"]');
+  const file = input?.files?.[0];
+  const token = state.filePreviewToken + 1;
+  state.filePreviewToken = token;
+
+  if (!file) {
+    resetFilePreview();
+    return;
+  }
+
+  setFilePreviewState({
+    mode: "loading",
+    title: file.name,
+    summary: `Rendering a tiny preview from ${formatBytes(file.size)}...`,
+    placeholder: "Rendering preview",
+  });
+
+  try {
+    const body = new FormData();
+    body.append("input_file", file);
+    const response = await api("/api/preview", {
+      method: "POST",
+      body,
+    });
+    if (token !== state.filePreviewToken) return;
+
+    const preview = response.preview;
+    setFilePreviewState({
+      mode: "ready",
+      title: preview.filename || file.name,
+      summary: describeFilePreview(preview),
+      imageUrl: preview.image_url,
+    });
+  } catch (error) {
+    if (token !== state.filePreviewToken) return;
+    setFilePreviewState({
+      mode: "error",
+      title: file.name,
+      summary: error.message,
+      placeholder: "Preview unavailable",
+    });
   }
 }
 
@@ -1169,7 +1259,8 @@ function syncRenderControls() {
   const presetControl = fieldset.querySelector('select[name="material_preset"]');
   const autoHeightToggle = fieldset.querySelector('input[name="auto_height_scale"]');
 
-  fieldset.classList.toggle("is-disabled", !enabled);
+  fieldset.classList.toggle("is-disabled", !available);
+  fieldset.classList.toggle("is-folded", !enabled);
 
   allControls.forEach((control) => {
     if (control === renderToggle) return;
@@ -1333,6 +1424,7 @@ async function submitJob(event) {
     });
     state.selectedJobId = response.job.id;
     form.reset();
+    resetFilePreview();
     syncRenderControls();
     status.textContent = `Queued job ${response.job.id}`;
     await poll();
@@ -1364,8 +1456,12 @@ function bootstrap() {
   const renderToggle = document.querySelector('input[name="enable_render"]');
   const presetControl = document.querySelector('select[name="material_preset"]');
   const autoHeightToggle = document.querySelector('input[name="auto_height_scale"]');
+  const fileInput = document.querySelector('input[name="input_file"]');
   const previewControls = document.querySelectorAll("#render-fieldset input, #render-fieldset select");
 
+  if (fileInput) {
+    fileInput.addEventListener("change", previewSelectedFile);
+  }
   if (renderToggle) {
     renderToggle.addEventListener("change", syncRenderControls);
   }
@@ -1383,6 +1479,7 @@ function bootstrap() {
   bindImageModal();
   bindRenderPreviewModal();
   bindRenderPreviewModalControls();
+  resetFilePreview();
   syncRenderControls();
   applyLayoutState();
   applyRenderActionState();

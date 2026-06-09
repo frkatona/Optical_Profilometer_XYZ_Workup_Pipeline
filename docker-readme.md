@@ -49,11 +49,11 @@ This project uses bind mounts so that:
 - the container reads them from `/data`
 - the container writes results into `/out`
 
-## 3. The Two Images In This Repository
+## 3. The Two Web UI Images In This Repository
 
 This repository can build two different images from the same `Dockerfile`.
 
-### Main analysis image
+### Default Web UI image
 
 Image name used in this guide:
 
@@ -63,17 +63,16 @@ optical-profilometer
 
 What it does:
 
-- reads `.xyz` data
-- computes stats
-- saves plots
-- exports OBJ files for Blender
+- launches the upload-and-monitor Web UI
+- reads `.xyz` uploads
+- computes stats, saves plots, and exports OBJ files
+- keeps Blender out of the default image
 
 What it does not do:
 
-- open interactive windows
 - render Blender scenes
 
-### Optional Blender renderer image
+### Blender-enabled Web UI image
 
 Image name used in this guide:
 
@@ -83,19 +82,15 @@ optical-profilometer-blender
 
 What it does:
 
-- imports an OBJ file
-- builds a basic Blender scene
-- renders a still image
-
-What it does not do:
-
-- run the profilometry analysis itself
+- does everything the default Web UI does
+- includes Blender so the Web UI can render exported OBJ files
+- keeps Blender controls folded until you check `Render an exported OBJ after analysis`
 
 ## 4. Important Paths: Where Files Actually Are
 
 The most important beginner question is: where do the files end up?
 
-This project uses these container paths:
+The Web UI persists jobs under `/app/webui_data`. The CLI examples later in this guide use these container paths:
 
 | Container path | Meaning |
 | --- | --- |
@@ -147,7 +142,7 @@ That is why this project should normally be run with an `/out` bind mount.
 
 ## 5. Build The Images
 
-### Build the main analysis image
+### Build the default Web UI image
 
 Run this from the repository root:
 
@@ -155,42 +150,79 @@ Run this from the repository root:
 docker build -t optical-profilometer .
 ```
 
-This builds the default final stage from the `Dockerfile`.
+This builds the default final stage from the `Dockerfile`, which is the Web UI without Blender.
 
-### Build the optional Blender image
+### Build the Blender-enabled Web UI image
 
 Run this only if you want the rendering step:
 
 ```powershell
-docker build --target blender-renderer -t optical-profilometer-blender .
+docker build --target blender -t optical-profilometer-blender .
 ```
 
 This image is larger because it installs Blender.
 
-## 6. First Run: Smallest Possible Test
+### Build the optional CLI image
 
-Create a host output folder first:
+Run this only if you want the headless command-line examples later in this guide:
 
 ```powershell
-New-Item -ItemType Directory -Force .\docker-out | Out-Null
+docker build --target runtime -t optical-profilometer-cli .
 ```
 
-### Show the main container help
+### Build and push both Web UI images for major CPU architectures
+
+The included `docker-bake.hcl` defines the default Web UI image and the Blender-enabled Web UI image for `linux/amd64` and `linux/arm64`.
 
 ```powershell
-docker run --rm optical-profilometer
+$env:REGISTRY_IMAGE="your-dockerhub-user/optical-profilometer"
+$env:VERSION="1.0"
+docker buildx bake --push
+```
+
+This publishes:
+
+- `${REGISTRY_IMAGE}:1.0`
+- `${REGISTRY_IMAGE}:1.0-blender`
+
+## 6. First Run: Smallest Possible Test
+
+Create a host data folder first:
+
+```powershell
+New-Item -ItemType Directory -Force .\webui-data | Out-Null
+```
+
+### Start the default Web UI
+
+```powershell
+docker run --rm -p 8000:8000 `
+  --mount "type=bind,source=${PWD}\webui-data,target=/app/webui_data" `
+  optical-profilometer
 ```
 
 What `--rm` means:
 
 - remove the container automatically after it exits
 
+Then open:
+
+```text
+http://127.0.0.1:8000
+```
+
 ### Run a fast stats-only smoke test
+
+Build the CLI image first if you have not already:
+
+```powershell
+docker build --target runtime -t optical-profilometer-cli .
+```
 
 ```powershell
 docker run --rm `
   --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
-  optical-profilometer /data/test.xyz --stats-only -r 32
+  optical-profilometer-cli /data/test.xyz --stats-only -r 32
 ```
 
 What this does:
@@ -208,7 +240,7 @@ This command does **not** save files, because no `/out` folder was mounted.
 docker run --rm `
   --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
   --mount "type=bind,source=${PWD}\docker-out,target=/out" `
-  optical-profilometer /data/test.xyz -o /out --no-display -r 32
+  optical-profilometer-cli /data/test.xyz -o /out --no-display -r 32
 ```
 
 This is the standard container pattern for this project.
@@ -256,7 +288,7 @@ Example:
 docker run --rm `
   --mount "type=bind,source=${PWD}\heightmaps,target=/data,readonly" `
   --mount "type=bind,source=${PWD}\docker-out,target=/out" `
-  optical-profilometer `
+  optical-profilometer-cli `
   /data/2026-03_PCD-1um-pristine/low_zoom_01.xyz `
   -o /out --no-display
 ```
@@ -274,7 +306,7 @@ If you want geometry for rendering or further 3D work:
 docker run --rm `
   --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
   --mount "type=bind,source=${PWD}\docker-out,target=/out" `
-  optical-profilometer `
+  optical-profilometer-cli `
   /data/test.xyz -o /out --no-display --export-obj roughness -r 32
 ```
 
@@ -297,7 +329,7 @@ then you will get one OBJ file per exported surface.
 First build the Blender image if you have not already:
 
 ```powershell
-docker build --target blender-renderer -t optical-profilometer-blender .
+docker build --target blender-renderer -t optical-profilometer-renderer .
 ```
 
 Then render an OBJ:
@@ -305,7 +337,7 @@ Then render an OBJ:
 ```powershell
 docker run --rm `
   --mount "type=bind,source=${PWD}\docker-out,target=/out" `
-  optical-profilometer-blender `
+  optical-profilometer-renderer `
   --input /out/test_roughness.obj `
   --output /out/test_roughness_render.png
 ```
@@ -323,7 +355,7 @@ and writes:
 ```powershell
 docker run --rm `
   --mount "type=bind,source=${PWD}\docker-out,target=/out" `
-  optical-profilometer-blender `
+  optical-profilometer-renderer `
   --input /out/test_roughness.obj `
   --output /out/test_roughness_render.png `
   --engine CYCLES `
@@ -389,13 +421,13 @@ Then start two detached containers:
 docker run -d --name profilometer-a `
   --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
   --mount "type=bind,source=${PWD}\docker-out\run-a,target=/out" `
-  optical-profilometer `
+  optical-profilometer-cli `
   /data/test.xyz -o /out --no-display -r 16
 
 docker run -d --name profilometer-b `
   --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
   --mount "type=bind,source=${PWD}\docker-out\run-b,target=/out" `
-  optical-profilometer `
+  optical-profilometer-cli `
   /data/test.xyz -o /out --no-display -r 32
 ```
 
@@ -450,13 +482,13 @@ Copy-Item .\docker-out\test_roughness.obj .\docker-out\render-b\test_roughness.o
 
 docker run -d --name blender-a `
   --mount "type=bind,source=${PWD}\docker-out\render-a,target=/out" `
-  optical-profilometer-blender `
+  optical-profilometer-renderer `
   --input /out/test_roughness.obj `
   --output /out/render-a.png
 
 docker run -d --name blender-b `
   --mount "type=bind,source=${PWD}\docker-out\render-b,target=/out" `
-  optical-profilometer-blender `
+  optical-profilometer-renderer `
   --input /out/test_roughness.obj `
   --output /out/render-b.png `
   --camera-azimuth 55
@@ -581,30 +613,41 @@ If you only want the safest basic path, do this:
 
 1. Start Docker Desktop.
 2. Run `docker build -t optical-profilometer .`
-3. Create `.\docker-out`
-4. Run one stats-only test on `test.xyz`
-5. Run one saved-output analysis with `-o /out --no-display`
-6. Confirm the files exist in `.\docker-out`
-7. Only after that, try OBJ export and Blender rendering
-8. Only after that, try parallel jobs with separate output folders
+3. Create `.\webui-data`
+4. Run the Web UI with `docker run --rm -p 8000:8000 ... optical-profilometer`
+5. Open `http://127.0.0.1:8000`
+6. Upload a small `.xyz` file and confirm the preview appears
+7. Build `docker build --target blender -t optical-profilometer-blender .` only if you need Blender rendering
+8. Build `docker build --target runtime -t optical-profilometer-cli .` only if you need CLI runs
 
 ## 19. Copy-Paste Cheat Sheet
 
-Build the main image:
+Build the default Web UI image:
 
 ```powershell
 docker build -t optical-profilometer .
 ```
 
-Build the Blender image:
+Build the Blender-enabled Web UI image:
 
 ```powershell
-docker build --target blender-renderer -t optical-profilometer-blender .
+docker build --target blender -t optical-profilometer-blender .
 ```
 
-Create output folder:
+Run the default Web UI:
 
 ```powershell
+New-Item -ItemType Directory -Force .\webui-data | Out-Null
+
+docker run --rm -p 8000:8000 `
+  --mount "type=bind,source=${PWD}\webui-data,target=/app/webui_data" `
+  optical-profilometer
+```
+
+Build the CLI image:
+
+```powershell
+docker build --target runtime -t optical-profilometer-cli .
 New-Item -ItemType Directory -Force .\docker-out | Out-Null
 ```
 
@@ -613,7 +656,7 @@ Fast test:
 ```powershell
 docker run --rm `
   --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
-  optical-profilometer /data/test.xyz --stats-only -r 32
+  optical-profilometer-cli /data/test.xyz --stats-only -r 32
 ```
 
 Save analysis outputs:
@@ -622,7 +665,7 @@ Save analysis outputs:
 docker run --rm `
   --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
   --mount "type=bind,source=${PWD}\docker-out,target=/out" `
-  optical-profilometer /data/test.xyz -o /out --no-display -r 32
+  optical-profilometer-cli /data/test.xyz -o /out --no-display -r 32
 ```
 
 Export OBJ:
@@ -631,15 +674,17 @@ Export OBJ:
 docker run --rm `
   --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
   --mount "type=bind,source=${PWD}\docker-out,target=/out" `
-  optical-profilometer /data/test.xyz -o /out --no-display --export-obj roughness -r 32
+  optical-profilometer-cli /data/test.xyz -o /out --no-display --export-obj roughness -r 32
 ```
 
 Render OBJ:
 
 ```powershell
+docker build --target blender-renderer -t optical-profilometer-renderer .
+
 docker run --rm `
   --mount "type=bind,source=${PWD}\docker-out,target=/out" `
-  optical-profilometer-blender `
+  optical-profilometer-renderer `
   --input /out/test_roughness.obj `
   --output /out/test_roughness_render.png
 ```

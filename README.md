@@ -10,110 +10,72 @@ Continue reading for details or skip to the [PCD data analysis section](#PCD_ima
 
 ## Docker
 
-This project can also be packaged as a headless Docker CLI. The image contains the code and Python dependencies only; raw `.xyz` inputs and generated outputs should be bind-mounted at runtime.
-
-- Mount inputs under `/data` as read-only.
-- Mount an output directory under `/out` for figures, statistics, and OBJ exports.
-- Use `--no-display` in the container. It requires `-o /out` so plots are saved instead of shown.
-
-```powershell
-New-Item -ItemType Directory -Force .\docker-out | Out-Null
-
-docker build -t optical-profilometer .
-
-docker run --rm optical-profilometer
-
-docker run --rm `
-  --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
-  optical-profilometer /data/test.xyz --stats-only -r 32
-
-docker run --rm `
-  --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
-  --mount "type=bind,source=${PWD}\docker-out,target=/out" `
-  optical-profilometer /data/test.xyz -o /out --no-display -r 32
-
-docker run --rm `
-  --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
-  --mount "type=bind,source=${PWD}\docker-out,target=/out" `
-  optical-profilometer /data/test.xyz -o /out --no-display --export-obj roughness -r 32
-
-docker run --rm --entrypoint python optical-profilometer interpolation_study.py
-```
-
-To mount an entire dataset directory instead of a single file, replace the file mount with `--mount "type=bind,source=${PWD}\heightmaps,target=/data,readonly"` and pass the matching in-container file path such as `/data/2026-03_PCD-1um-pristine/low_zoom_01.xyz`.
-
-If you use Docker Desktop on Windows, bind-mounted I/O is usually faster from the WSL/Linux filesystem than from a OneDrive-backed Windows path.
-
-### Optional Blender renderer target
-
-The default image stays small and only handles analysis, plots, and OBJ export. If you want a headless Blender render step, build the optional `blender-renderer` target as a separate image:
-
-```powershell
-docker build --target blender-renderer -t optical-profilometer-blender .
-```
-
-Then render an exported OBJ into a still image:
-
-```powershell
-docker run --rm `
-  --mount "type=bind,source=${PWD}\docker-out,target=/out" `
-  optical-profilometer-blender `
-  --input /out/test_roughness.obj `
-  --output /out/test_roughness_render.png
-```
-
-Useful optional flags:
-
-- `--engine CYCLES` or `--engine BLENDER_WORKBENCH`
-- `--resolution-x 1920 --resolution-y 1080`
-- `--samples 128`
-- `--camera-azimuth 45 --camera-elevation 30`
-- `--transparent-background`
-
-The Blender target expects an existing OBJ file, so the typical workflow is:
-
-```powershell
-docker run --rm `
-  --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
-  --mount "type=bind,source=${PWD}\docker-out,target=/out" `
-  optical-profilometer /data/test.xyz -o /out --no-display --export-obj roughness -r 32
-
-docker run --rm `
-  --mount "type=bind,source=${PWD}\docker-out,target=/out" `
-  optical-profilometer-blender `
-  --input /out/test_roughness.obj `
-  --output /out/test_roughness_render.png
-```
-
-### Optional web UI
-
-There is also a barebones web UI for uploading `.xyz` files, choosing analysis and render settings, monitoring progress, previewing images, and downloading stats CSVs plus generated artifacts.
-
-Run it locally:
-
-```powershell
-py web_ui.py --host 127.0.0.1 --port 8000
-```
-
-Then open `http://127.0.0.1:8000`.
-
-Build the Docker image for the UI:
-
-```powershell
-docker build --target web-ui -t optical-profilometer-web .
-```
-
-Run the Dockerized UI and persist job files to a host folder:
+The default Docker image is the Web UI without Blender. It can upload `.xyz` files, run analysis, show progress, preview generated images, and download statistics plus artifacts while keeping the image smaller.
 
 ```powershell
 New-Item -ItemType Directory -Force .\webui-data | Out-Null
 
+docker build -t optical-profilometer .
+
 docker run --rm -p 8000:8000 `
   --mount "type=bind,source=${PWD}\webui-data,target=/app/webui_data" `
-  optical-profilometer-web
+  optical-profilometer
 ```
 
-The `web-ui` target includes Blender, so the render controls in the UI are available there even if Blender is not installed on the host machine.
+Then open `http://127.0.0.1:8000`.
+
+### Blender Web UI Build
+
+Build the `blender` target when you want the same Web UI plus Blender rendering support:
+
+```powershell
+docker build --target blender -t optical-profilometer-blender .
+
+docker run --rm -p 8000:8000 `
+  --mount "type=bind,source=${PWD}\webui-data,target=/app/webui_data" `
+  optical-profilometer-blender
+```
+
+In the UI, Blender controls stay folded until `Render an exported OBJ after analysis` is checked.
+
+### Multi-Architecture Builds
+
+The included `docker-bake.hcl` builds the two primary images for `linux/amd64` and `linux/arm64`:
+
+```powershell
+$env:REGISTRY_IMAGE="your-dockerhub-user/optical-profilometer"
+$env:VERSION="1.0"
+docker buildx bake --push
+```
+
+This publishes `${REGISTRY_IMAGE}:1.0` for the default no-Blender Web UI and `${REGISTRY_IMAGE}:1.0-blender` for the Blender-enabled Web UI.
+
+### Optional CLI Targets
+
+For scripted/headless analysis, build the CLI target explicitly:
+
+```powershell
+New-Item -ItemType Directory -Force .\docker-out | Out-Null
+
+docker build --target runtime -t optical-profilometer-cli .
+
+docker run --rm `
+  --mount "type=bind,source=${PWD}\test.xyz,target=/data/test.xyz,readonly" `
+  --mount "type=bind,source=${PWD}\docker-out,target=/out" `
+  optical-profilometer-cli /data/test.xyz -o /out --no-display --export-obj roughness -r 32
+```
+
+The standalone `blender-renderer` target is still available if you only need to render an existing OBJ without launching the Web UI:
+
+```powershell
+docker build --target blender-renderer -t optical-profilometer-renderer .
+
+docker run --rm `
+  --mount "type=bind,source=${PWD}\docker-out,target=/out" `
+  optical-profilometer-renderer `
+  --input /out/test_roughness.obj `
+  --output /out/test_roughness_render.png
+```
 
 ---
 

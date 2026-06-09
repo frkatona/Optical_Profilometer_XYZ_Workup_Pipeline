@@ -490,16 +490,107 @@ legend {
   flex: none;
 }
 
+.file-preview-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(120px, 0.9fr);
+  gap: 0.75rem;
+  min-height: 118px;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(37, 136, 244, 0.08), rgba(18, 43, 52, 0.02)),
+    #ffffff;
+}
+
+.file-preview-meta {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.file-preview-meta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-preview-meta span:last-child {
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.file-preview-frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 92px;
+  overflow: hidden;
+  border: 1px solid #d4e0eb;
+  border-radius: 13px;
+  background:
+    linear-gradient(45deg, rgba(18, 43, 52, 0.05) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(18, 43, 52, 0.05) 25%, transparent 25%),
+    #f6f9fc;
+  background-size: 16px 16px;
+}
+
+.file-preview-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 92px;
+  object-fit: contain;
+}
+
+.file-preview-frame span {
+  padding: 0.4rem 0.55rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.file-preview-frame.is-loading::after {
+  content: "";
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(37, 136, 244, 0.18);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
+.file-preview-card.is-error {
+  border-color: rgba(209, 67, 67, 0.45);
+  background:
+    linear-gradient(135deg, rgba(209, 67, 67, 0.08), rgba(209, 67, 67, 0.02)),
+    #ffffff;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .checkbox-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.55rem;
 }
 
-.render-fieldset.is-disabled .render-controls,
-.render-fieldset.is-disabled .subsection {
-  opacity: 0.48;
-  pointer-events: none;
+.render-fieldset.is-folded .render-controls,
+.render-fieldset.is-folded .subsection {
+  display: none;
+}
+
+.render-unavailable {
+  margin: 0.4rem 0 0;
+  font-size: 0.9rem;
 }
 
 .subsection {
@@ -1409,6 +1500,7 @@ body.modal-open {
 
   .form-grid,
   .form-grid.compact,
+  .file-preview-card,
   .checkbox-grid,
   .stats-grid,
   .render-preview-mini-grid,
