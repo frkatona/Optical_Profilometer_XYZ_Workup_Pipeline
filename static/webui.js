@@ -17,6 +17,21 @@ const state = {
     stickToBottom: true,
   },
   filePreviewToken: 0,
+  filePreviewMetadata: null,
+  cropSelection: null,
+  cropDrag: null,
+  surface: {
+    gl: null,
+    program: null,
+    buffers: null,
+    mesh: null,
+    rotationX: -0.72,
+    rotationY: 0.72,
+    distance: 2.25,
+    dragging: false,
+    lastX: 0,
+    lastY: 0,
+  },
 };
 
 const renderOptionFieldMap = {
@@ -190,6 +205,141 @@ function setStatusMessage(message) {
   }
 }
 
+function getPreviewImageContentRect() {
+  const frame = document.getElementById("file-preview-frame");
+  const image = document.getElementById("file-preview-image");
+  if (!frame || !image || image.hidden || !image.naturalWidth || !image.naturalHeight) return null;
+
+  const imageRect = image.getBoundingClientRect();
+  const frameRect = frame.getBoundingClientRect();
+  const naturalRatio = image.naturalWidth / image.naturalHeight;
+  const boxRatio = imageRect.width / imageRect.height;
+  let width = imageRect.width;
+  let height = imageRect.height;
+  let left = imageRect.left;
+  let top = imageRect.top;
+
+  if (boxRatio > naturalRatio) {
+    width = imageRect.height * naturalRatio;
+    left = imageRect.left + (imageRect.width - width) / 2;
+  } else {
+    height = imageRect.width / naturalRatio;
+    top = imageRect.top + (imageRect.height - height) / 2;
+  }
+
+  return {
+    left,
+    top,
+    width,
+    height,
+    frameLeft: frameRect.left,
+    frameTop: frameRect.top,
+  };
+}
+
+function pointerToPreviewUnit(event) {
+  const rect = getPreviewImageContentRect();
+  if (!rect) return null;
+  return {
+    x: clamp((event.clientX - rect.left) / rect.width, 0, 1),
+    y: clamp((event.clientY - rect.top) / rect.height, 0, 1),
+  };
+}
+
+function normalizeCropSelection(selection) {
+  if (!selection) return null;
+  const x1 = clamp(Math.min(selection.x1, selection.x2), 0, 1);
+  const x2 = clamp(Math.max(selection.x1, selection.x2), 0, 1);
+  const y1 = clamp(Math.min(selection.y1, selection.y2), 0, 1);
+  const y2 = clamp(Math.max(selection.y1, selection.y2), 0, 1);
+  if ((x2 - x1) < 0.002 || (y2 - y1) < 0.002) return null;
+  return { x1, x2, y1, y2 };
+}
+
+function drawCropSelection() {
+  const crop = document.getElementById("file-preview-crop");
+  const selection = normalizeCropSelection(state.cropSelection);
+  const rect = getPreviewImageContentRect();
+  if (!crop || !selection || !rect) {
+    if (crop) crop.hidden = true;
+    return;
+  }
+
+  crop.hidden = false;
+  crop.style.left = `${rect.left - rect.frameLeft + selection.x1 * rect.width}px`;
+  crop.style.top = `${rect.top - rect.frameTop + selection.y1 * rect.height}px`;
+  crop.style.width = `${(selection.x2 - selection.x1) * rect.width}px`;
+  crop.style.height = `${(selection.y2 - selection.y1) * rect.height}px`;
+}
+
+function clearCropSelection({ clearFields = false } = {}) {
+  state.cropSelection = null;
+  state.cropDrag = null;
+  drawCropSelection();
+  if (clearFields) {
+    ["bound_x1", "bound_x2", "bound_y1", "bound_y2"].forEach((name) => {
+      const input = document.querySelector(`[name="${name}"]`);
+      if (input) input.value = "";
+    });
+  }
+}
+
+function formatCropNumber(value) {
+  if (!Number.isFinite(value)) return "";
+  return Number(value.toFixed(3)).toString();
+}
+
+function setCropBoundsFromSelection(selection) {
+  const normalized = normalizeCropSelection(selection);
+  const metadata = state.filePreviewMetadata;
+  if (!normalized || !metadata?.pixel_spacing_um) return;
+
+  const pixelSpacing = Number(metadata.pixel_spacing_um);
+  const width = Number(metadata.width || 0);
+  const height = Number(metadata.height || 0);
+  const values = {
+    bound_x1: normalized.x1 * width * pixelSpacing,
+    bound_x2: normalized.x2 * width * pixelSpacing,
+    bound_y1: normalized.y1 * height * pixelSpacing,
+    bound_y2: normalized.y2 * height * pixelSpacing,
+  };
+
+  Object.entries(values).forEach(([name, value]) => {
+    const input = document.querySelector(`[name="${name}"]`);
+    if (input) input.value = formatCropNumber(value);
+  });
+
+  const options = document.querySelector(".analysis-options");
+  if (options) options.open = true;
+}
+
+function syncCropSelectionFromInputs() {
+  const metadata = state.filePreviewMetadata;
+  if (!metadata?.pixel_spacing_um) return;
+
+  const pixelSpacing = Number(metadata.pixel_spacing_um);
+  const widthUm = Number(metadata.width || 0) * pixelSpacing;
+  const heightUm = Number(metadata.height || 0) * pixelSpacing;
+  const values = ["bound_x1", "bound_x2", "bound_y1", "bound_y2"].map((name) => {
+    const input = document.querySelector(`[name="${name}"]`);
+    const value = Number.parseFloat(input?.value ?? "");
+    return Number.isFinite(value) ? value : null;
+  });
+
+  if (values.some((value) => value === null) || widthUm <= 0 || heightUm <= 0) {
+    clearCropSelection();
+    return;
+  }
+
+  state.cropSelection = {
+    x1: values[0] / widthUm,
+    x2: values[1] / widthUm,
+    y1: values[2] / heightUm,
+    y2: values[3] / heightUm,
+  };
+  drawCropSelection();
+}
+
 function setFilePreviewState({ mode = "empty", title, summary, imageUrl, placeholder }) {
   const card = document.getElementById("file-preview-card");
   const frame = document.getElementById("file-preview-frame");
@@ -197,6 +347,7 @@ function setFilePreviewState({ mode = "empty", title, summary, imageUrl, placeho
   const placeholderNode = document.getElementById("file-preview-placeholder");
   const titleNode = document.getElementById("file-preview-title");
   const summaryNode = document.getElementById("file-preview-summary");
+  const legendNode = document.getElementById("file-preview-legend");
   const dropzone = document.getElementById("file-dropzone");
   const dropzoneTitle = document.getElementById("file-dropzone-title");
   const dropzoneSummary = document.getElementById("file-dropzone-summary");
@@ -208,6 +359,8 @@ function setFilePreviewState({ mode = "empty", title, summary, imageUrl, placeho
   card.classList.toggle("is-visible", mode !== "empty");
   frame.classList.toggle("is-loading", mode === "loading");
   frame.classList.toggle("is-empty", !imageUrl);
+  frame.classList.toggle("is-croppable", mode === "ready" && Boolean(imageUrl));
+  if (legendNode) legendNode.hidden = mode !== "ready";
   if (dropzone) {
     dropzone.classList.toggle("has-file", mode === "ready" || mode === "loading");
     dropzone.classList.toggle("is-error", mode === "error");
@@ -235,16 +388,21 @@ function setFilePreviewState({ mode = "empty", title, summary, imageUrl, placeho
   }
 
   if (imageUrl) {
+    image.addEventListener("load", drawCropSelection, { once: true });
     image.src = imageUrl;
     image.hidden = false;
   } else {
     image.removeAttribute("src");
     image.hidden = true;
   }
+
+  drawCropSelection();
 }
 
 function resetFilePreview() {
   state.filePreviewToken += 1;
+  state.filePreviewMetadata = null;
+  clearCropSelection();
   setFilePreviewState({
     mode: "empty",
     title: "",
@@ -257,7 +415,7 @@ function describeFilePreview(preview) {
   const sourceSize = `${preview.width} x ${preview.height}`;
   const previewSize = `${preview.preview_width} x ${preview.preview_height}`;
   const warning = preview.warnings?.length ? ` Warning: ${preview.warnings[0]}` : "";
-  return `${sourceSize} source, ${previewSize} preview, ${formatPercent(preview.coverage_percent)} coverage, ${preview.resolution_factor}x downsample.${warning}`;
+  return `${sourceSize} source, ${previewSize} preview, ${formatPercent(preview.coverage_percent)} coverage, ${formatPercent(preview.no_data_percent)} No Data/NaN in coral, ${preview.resolution_factor}x downsample.${warning}`;
 }
 
 async function previewSelectedFile() {
@@ -277,6 +435,8 @@ async function previewSelectedFile() {
     summary: `Rendering a tiny preview from ${formatBytes(file.size)}...`,
     placeholder: "Rendering preview",
   });
+  state.filePreviewMetadata = null;
+  clearCropSelection({ clearFields: true });
 
   try {
     const body = new FormData();
@@ -288,6 +448,7 @@ async function previewSelectedFile() {
     if (token !== state.filePreviewToken) return;
 
     const preview = response.preview;
+    state.filePreviewMetadata = preview;
     setFilePreviewState({
       mode: "ready",
       title: preview.filename || file.name,
@@ -296,6 +457,8 @@ async function previewSelectedFile() {
     });
   } catch (error) {
     if (token !== state.filePreviewToken) return;
+    state.filePreviewMetadata = null;
+    clearCropSelection();
     setFilePreviewState({
       mode: "error",
       title: file.name,
@@ -350,6 +513,60 @@ function bindFileDropzone() {
       previewSelectedFile();
     }
   });
+}
+
+function bindPreviewCropPicker() {
+  const frame = document.getElementById("file-preview-frame");
+  if (!frame) return;
+
+  frame.addEventListener("pointerdown", (event) => {
+    if (!state.filePreviewMetadata || !frame.classList.contains("is-croppable")) return;
+    const point = pointerToPreviewUnit(event);
+    if (!point) return;
+    event.preventDefault();
+    state.cropDrag = { pointerId: event.pointerId, start: point };
+    state.cropSelection = { x1: point.x, y1: point.y, x2: point.x, y2: point.y };
+    frame.setPointerCapture(event.pointerId);
+    drawCropSelection();
+  });
+
+  frame.addEventListener("pointermove", (event) => {
+    if (!state.cropDrag || state.cropDrag.pointerId !== event.pointerId) return;
+    const point = pointerToPreviewUnit(event);
+    if (!point) return;
+    event.preventDefault();
+    state.cropSelection = {
+      x1: state.cropDrag.start.x,
+      y1: state.cropDrag.start.y,
+      x2: point.x,
+      y2: point.y,
+    };
+    drawCropSelection();
+  });
+
+  const finishDrag = (event) => {
+    if (!state.cropDrag || state.cropDrag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    state.cropDrag = null;
+    const normalized = normalizeCropSelection(state.cropSelection);
+    if (!normalized) {
+      clearCropSelection({ clearFields: true });
+      return;
+    }
+    state.cropSelection = normalized;
+    setCropBoundsFromSelection(normalized);
+    drawCropSelection();
+  };
+
+  frame.addEventListener("pointerup", finishDrag);
+  frame.addEventListener("pointercancel", finishDrag);
+
+  ["bound_x1", "bound_x2", "bound_y1", "bound_y2"].forEach((name) => {
+    const input = document.querySelector(`[name="${name}"]`);
+    if (input) input.addEventListener("input", syncCropSelectionFromInputs);
+  });
+
+  window.addEventListener("resize", drawCropSelection);
 }
 
 function renderHintText(job) {
@@ -554,6 +771,21 @@ function renderPrimaryAnalysisImage(job) {
   `;
 }
 
+function renderSurfaceExplorer(job) {
+  if (!job || job.status !== "completed") return "";
+  return `
+    <section class="surface-explorer-card">
+      <div>
+        <strong>Experimental 3D surface</strong>
+        <span>Open a browser-rendered heightmap mesh with adaptive remeshing for smoother rotate and zoom.</span>
+      </div>
+      <button type="button" class="panel-collapse" data-surface-open="${escapeHtml(job.id)}">
+        Open 3D view
+      </button>
+    </section>
+  `;
+}
+
 function renderPreviews(job) {
   const primary = primaryAnalysisPreview(job);
   const previews = (job.artifacts || []).filter(
@@ -700,6 +932,12 @@ function bindDetailInteractions(detail) {
       });
     });
   });
+
+  detail.querySelectorAll("[data-surface-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openSurfaceModal(button.dataset.surfaceOpen);
+    });
+  });
 }
 
 function renderJobDetail(job) {
@@ -741,6 +979,7 @@ function renderJobDetail(job) {
       </section>
 
       ${renderPrimaryAnalysisImage(job)}
+      ${renderSurfaceExplorer(job)}
 
       <div class="detail-grid">
         ${renderCollapsibleSection("stats", "Stats Summary", "Surface metrics", renderStats(job))}
@@ -828,6 +1067,341 @@ function bindImageModal() {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !modal.classList.contains("is-hidden")) {
       closeImageModal();
+    }
+  });
+}
+
+function surfaceSetStatus(message) {
+  const status = document.getElementById("surface-status");
+  if (status) status.textContent = message || "";
+}
+
+function surfaceStatsMarkup(metadata = {}) {
+  const entries = [
+    ["Vertices", Number(metadata.vertex_count || 0).toLocaleString()],
+    ["Triangles", Number(metadata.triangle_count || 0).toLocaleString()],
+    ["Remesh", metadata.remesh_mode || "n/a"],
+    ["Sample factor", `${metadata.sample_factor || 1}x`],
+    ["Grid", `${metadata.selected_cols || 0} x ${metadata.selected_rows || 0}`],
+    ["Coverage", `${metadata.valid_coverage_percent ?? "n/a"}%`],
+    ["Height range", `${Number(metadata.height_min_um || 0).toFixed(3)} to ${Number(metadata.height_max_um || 0).toFixed(3)} um`],
+  ];
+  return entries
+    .map(([label, value]) => `
+      <div class="surface-chip">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+      </div>
+    `)
+    .join("");
+}
+
+function surfaceMatrixMultiply(a, b) {
+  const out = new Array(16).fill(0);
+  for (let column = 0; column < 4; column += 1) {
+    for (let row = 0; row < 4; row += 1) {
+      for (let index = 0; index < 4; index += 1) {
+        out[column * 4 + row] += a[index * 4 + row] * b[column * 4 + index];
+      }
+    }
+  }
+  return out;
+}
+
+function surfacePerspective(fovRadians, aspect, near, far) {
+  const scale = 1 / Math.tan(fovRadians / 2);
+  return [
+    scale / aspect, 0, 0, 0,
+    0, scale, 0, 0,
+    0, 0, (far + near) / (near - far), -1,
+    0, 0, (2 * far * near) / (near - far), 0,
+  ];
+}
+
+function surfaceTranslation(tx, ty, tz) {
+  return [
+    1, 0, 0, 0,
+    0, 1, 0, 0,
+    0, 0, 1, 0,
+    tx, ty, tz, 1,
+  ];
+}
+
+function surfaceRotationX(angle) {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  return [
+    1, 0, 0, 0,
+    0, c, s, 0,
+    0, -s, c, 0,
+    0, 0, 0, 1,
+  ];
+}
+
+function surfaceRotationY(angle) {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  return [
+    c, 0, -s, 0,
+    0, 1, 0, 0,
+    s, 0, c, 0,
+    0, 0, 0, 1,
+  ];
+}
+
+function compileSurfaceShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const message = gl.getShaderInfoLog(shader);
+    gl.deleteShader(shader);
+    throw new Error(message || "Could not compile 3D surface shader.");
+  }
+  return shader;
+}
+
+function createSurfaceProgram(gl) {
+  const vertexShader = compileSurfaceShader(
+    gl,
+    gl.VERTEX_SHADER,
+    `
+      attribute vec3 a_position;
+      attribute vec3 a_normal;
+      attribute float a_value;
+      uniform mat4 u_matrix;
+      uniform mat4 u_model;
+      uniform vec3 u_light_direction;
+      varying float v_value;
+      varying float v_light;
+      void main() {
+        vec3 normal = normalize((u_model * vec4(a_normal, 0.0)).xyz);
+        float light = dot(normal, normalize(u_light_direction));
+        v_light = clamp(light * 0.55 + 0.55, 0.25, 1.0);
+        v_value = a_value;
+        gl_Position = u_matrix * vec4(a_position, 1.0);
+      }
+    `
+  );
+  const fragmentShader = compileSurfaceShader(
+    gl,
+    gl.FRAGMENT_SHADER,
+    `
+      precision mediump float;
+      varying float v_value;
+      varying float v_light;
+      vec3 palette(float t) {
+        vec3 deep = vec3(0.05, 0.16, 0.32);
+        vec3 cyan = vec3(0.00, 0.58, 0.72);
+        vec3 green = vec3(0.55, 0.78, 0.28);
+        vec3 amber = vec3(1.00, 0.58, 0.16);
+        vec3 low = mix(deep, cyan, smoothstep(0.0, 0.42, t));
+        vec3 mid = mix(low, green, smoothstep(0.28, 0.72, t));
+        return mix(mid, amber, smoothstep(0.68, 1.0, t));
+      }
+      void main() {
+        vec3 color = palette(clamp(v_value, 0.0, 1.0)) * v_light;
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `
+  );
+  const program = gl.createProgram();
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    throw new Error(gl.getProgramInfoLog(program) || "Could not link 3D surface shader.");
+  }
+  return program;
+}
+
+function resizeSurfaceCanvas(canvas, gl) {
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.floor(canvas.clientWidth * ratio));
+  const height = Math.max(1, Math.floor(canvas.clientHeight * ratio));
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+
+function drawSurfaceMesh() {
+  const modal = document.getElementById("surface-modal");
+  const canvas = document.getElementById("surface-canvas");
+  const viewer = state.surface;
+  if (!canvas || !viewer.gl || !viewer.program || !viewer.buffers || modal?.classList.contains("is-hidden")) {
+    return;
+  }
+
+  const gl = viewer.gl;
+  resizeSurfaceCanvas(canvas, gl);
+  gl.enable(gl.DEPTH_TEST);
+  gl.disable(gl.CULL_FACE);
+  gl.clearColor(0.04, 0.07, 0.1, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.useProgram(viewer.program);
+
+  const model = surfaceMatrixMultiply(surfaceRotationY(viewer.rotationY), surfaceRotationX(viewer.rotationX));
+  const view = surfaceTranslation(0, -0.03, -viewer.distance);
+  const projection = surfacePerspective(Math.PI / 4, canvas.width / canvas.height, 0.05, 20);
+  const matrix = surfaceMatrixMultiply(projection, surfaceMatrixMultiply(view, model));
+
+  gl.uniformMatrix4fv(gl.getUniformLocation(viewer.program, "u_matrix"), false, new Float32Array(matrix));
+  gl.uniformMatrix4fv(gl.getUniformLocation(viewer.program, "u_model"), false, new Float32Array(model));
+  gl.uniform3fv(gl.getUniformLocation(viewer.program, "u_light_direction"), new Float32Array([0.4, 0.9, 0.55]));
+
+  const bindAttribute = (name, buffer, size) => {
+    const location = gl.getAttribLocation(viewer.program, name);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.enableVertexAttribArray(location);
+    gl.vertexAttribPointer(location, size, gl.FLOAT, false, 0, 0);
+  };
+
+  bindAttribute("a_position", viewer.buffers.position, 3);
+  bindAttribute("a_normal", viewer.buffers.normal, 3);
+  bindAttribute("a_value", viewer.buffers.value, 1);
+
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, viewer.buffers.index);
+  gl.drawElements(gl.TRIANGLES, viewer.buffers.indexCount, viewer.buffers.indexType, 0);
+}
+
+function setupSurfaceMesh(mesh) {
+  const canvas = document.getElementById("surface-canvas");
+  if (!canvas) return;
+  const gl = canvas.getContext("webgl", { antialias: true }) || canvas.getContext("experimental-webgl");
+  if (!gl) {
+    throw new Error("This browser does not support WebGL.");
+  }
+
+  const maxIndex = mesh.indices.reduce((max, value) => Math.max(max, value), 0);
+  let indexArray = new Uint16Array(mesh.indices);
+  let indexType = gl.UNSIGNED_SHORT;
+  if (maxIndex > 65535) {
+    const extension = gl.getExtension("OES_element_index_uint");
+    if (!extension) {
+      throw new Error("This mesh is too large for this browser's WebGL index support.");
+    }
+    indexArray = new Uint32Array(mesh.indices);
+    indexType = gl.UNSIGNED_INT;
+  }
+
+  const program = state.surface.program && state.surface.gl === gl
+    ? state.surface.program
+    : createSurfaceProgram(gl);
+  const createBuffer = (target, values) => {
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(target, buffer);
+    gl.bufferData(target, values, gl.STATIC_DRAW);
+    return buffer;
+  };
+
+  state.surface.gl = gl;
+  state.surface.program = program;
+  state.surface.mesh = mesh;
+  state.surface.buffers = {
+    position: createBuffer(gl.ARRAY_BUFFER, new Float32Array(mesh.vertices)),
+    normal: createBuffer(gl.ARRAY_BUFFER, new Float32Array(mesh.normals)),
+    value: createBuffer(gl.ARRAY_BUFFER, new Float32Array(mesh.values)),
+    index: createBuffer(gl.ELEMENT_ARRAY_BUFFER, indexArray),
+    indexCount: indexArray.length,
+    indexType,
+  };
+
+  const caption = document.getElementById("surface-modal-caption");
+  const stats = document.getElementById("surface-mesh-stats");
+  const warning = mesh.metadata?.warnings?.[0] ? ` Warning: ${mesh.metadata.warnings[0]}` : "";
+  if (caption) {
+    caption.textContent = `${mesh.filename} | drag to rotate, scroll to zoom.${warning}`;
+  }
+  if (stats) {
+    stats.innerHTML = surfaceStatsMarkup(mesh.metadata);
+  }
+  surfaceSetStatus("Interactive mesh ready.");
+  drawSurfaceMesh();
+}
+
+function resetSurfaceView() {
+  state.surface.rotationX = -0.72;
+  state.surface.rotationY = 0.72;
+  state.surface.distance = 2.25;
+  drawSurfaceMesh();
+}
+
+async function openSurfaceModal(jobId) {
+  const modal = document.getElementById("surface-modal");
+  const stats = document.getElementById("surface-mesh-stats");
+  if (!modal || !jobId) return;
+
+  modal.classList.remove("is-hidden");
+  modal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+  if (stats) stats.innerHTML = "";
+  surfaceSetStatus("Building adaptive browser mesh...");
+
+  try {
+    const response = await api(`/api/jobs/${encodeURIComponent(jobId)}/surface-mesh`);
+    setupSurfaceMesh(response.mesh);
+  } catch (error) {
+    surfaceSetStatus(error.message);
+  }
+}
+
+function closeSurfaceModal() {
+  const modal = document.getElementById("surface-modal");
+  if (!modal) return;
+  modal.classList.add("is-hidden");
+  modal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
+}
+
+function bindSurfaceModal() {
+  const modal = document.getElementById("surface-modal");
+  const canvas = document.getElementById("surface-canvas");
+  const resetButton = document.getElementById("surface-reset-view");
+  if (!modal || !canvas) return;
+
+  modal.querySelectorAll("[data-surface-close], #surface-modal-close").forEach((element) => {
+    element.addEventListener("click", closeSurfaceModal);
+  });
+  resetButton?.addEventListener("click", resetSurfaceView);
+
+  canvas.addEventListener("pointerdown", (event) => {
+    state.surface.dragging = true;
+    state.surface.lastX = event.clientX;
+    state.surface.lastY = event.clientY;
+    canvas.classList.add("is-dragging");
+    canvas.setPointerCapture(event.pointerId);
+  });
+  canvas.addEventListener("pointermove", (event) => {
+    if (!state.surface.dragging) return;
+    const dx = event.clientX - state.surface.lastX;
+    const dy = event.clientY - state.surface.lastY;
+    state.surface.lastX = event.clientX;
+    state.surface.lastY = event.clientY;
+    state.surface.rotationY += dx * 0.01;
+    state.surface.rotationX = clamp(state.surface.rotationX + dy * 0.01, -Math.PI * 0.48, Math.PI * 0.48);
+    drawSurfaceMesh();
+  });
+  ["pointerup", "pointercancel", "pointerleave"].forEach((eventName) => {
+    canvas.addEventListener(eventName, () => {
+      state.surface.dragging = false;
+      canvas.classList.remove("is-dragging");
+    });
+  });
+  canvas.addEventListener(
+    "wheel",
+    (event) => {
+      event.preventDefault();
+      state.surface.distance = clamp(state.surface.distance * Math.exp(event.deltaY * 0.001), 0.75, 7);
+      drawSurfaceMesh();
+    },
+    { passive: false }
+  );
+  window.addEventListener("resize", drawSurfaceMesh);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !modal.classList.contains("is-hidden")) {
+      closeSurfaceModal();
     }
   });
 }
@@ -1599,9 +2173,11 @@ function bootstrap() {
   });
 
   bindImageModal();
+  bindSurfaceModal();
   bindRenderPreviewModal();
   bindRenderPreviewModalControls();
   bindFileDropzone();
+  bindPreviewCropPicker();
   resetFilePreview();
   syncRenderControls();
   applyLayoutState();

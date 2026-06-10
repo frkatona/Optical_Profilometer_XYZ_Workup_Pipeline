@@ -15,6 +15,7 @@ from pathlib import Path
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 from flask import Flask, abort, jsonify, render_template, request, send_file
+from matplotlib import colormaps
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 import numpy as np
@@ -29,6 +30,11 @@ DEFAULT_MAX_WORKERS = int(os.environ.get("WEBUI_MAX_WORKERS", "2"))
 AVAILABLE_EXPORT_MAPS = ["raw", "form", "roughness", "waviness+roughness"]
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 PREVIEW_MAX_DIMENSION = 128
+PREVIEW_NO_DATA_COLOR = "#ff5b73"
+SURFACE_MESH_SOURCE_MAX_AXIS = 240
+SURFACE_MESH_RENDER_MAX_AXIS = 170
+SURFACE_MESH_BASE_AXIS = 88
+SURFACE_MESH_MAX_VERTICES = 60000
 BENIGN_WORKBENCH_LINES = {
     "EGL Error (0x3009): EGL_BAD_MATCH: Arguments are inconsistent (for example, a valid context requires buffers not supplied by a valid surface)."
 }
@@ -87,6 +93,7 @@ def load_xyz_preview(filepath):
         "preview_height": preview_height,
         "resolution_factor": factor,
         "sampled_points": int(counts.sum()),
+        "pixel_spacing_um": layout["pixel_spacing_um"],
         "warnings": layout["warnings"],
         "header_present": layout["header_present"],
         "coordinate_mode": layout["coordinate_mode"],
@@ -110,7 +117,9 @@ def render_preview_payload(filepath, filename):
     fig = Figure(figsize=(1.28, 1.28), dpi=100)
     fig.patch.set_facecolor("#f6f9fc")
     axis = fig.subplots()
-    axis.imshow(data, cmap="viridis", interpolation="nearest", aspect="auto", vmin=vmin, vmax=vmax)
+    cmap = colormaps["viridis"].copy()
+    cmap.set_bad(PREVIEW_NO_DATA_COLOR)
+    axis.imshow(data, cmap=cmap, interpolation="nearest", aspect="auto", vmin=vmin, vmax=vmax)
     axis.set_axis_off()
     fig.tight_layout(pad=0)
 
@@ -128,12 +137,233 @@ def render_preview_payload(filepath, filename):
         "preview_height": metadata["preview_height"],
         "resolution_factor": metadata["resolution_factor"],
         "sampled_points": metadata["sampled_points"],
+        "pixel_spacing_um": metadata["pixel_spacing_um"],
         "coverage_percent": round(coverage, 1),
+        "no_data_percent": round(100.0 - coverage, 1),
+        "no_data_color": PREVIEW_NO_DATA_COLOR,
         "z_min": float(np.min(values)),
         "z_max": float(np.max(values)),
         "warnings": metadata["warnings"],
         "header_present": metadata["header_present"],
         "coordinate_mode": metadata["coordinate_mode"],
+    }
+
+
+def choose_surface_mesh_factor(width, height, bounds=None, pixel_spacing_um=1.0):
+    if bounds:
+        x1_um, x2_um, y1_um, y2_um = bounds
+        width = max(1, int(abs(x2_um - x1_um) / max(pixel_spacing_um, 1e-9)))
+        height = max(1, int(abs(y2_um - y1_um) / max(pixel_spacing_um, 1e-9)))
+    largest_dimension = max(width, height)
+    if largest_dimension <= SURFACE_MESH_SOURCE_MAX_AXIS:
+        return 1
+    return max(1, (largest_dimension + SURFACE_MESH_SOURCE_MAX_AXIS - 1) // SURFACE_MESH_SOURCE_MAX_AXIS)
+
+
+def fill_heightmap_nans(data):
+    finite = np.isfinite(data)
+    if not finite.any():
+        raise ValueError("The selected job does not contain any valid height values for 3D viewing.")
+    fill_value = float(np.nanmedian(data))
+    return np.where(finite, data, fill_value), finite
+
+
+def load_surface_mesh_grid(filepath, bounds=None):
+    layout = inspect_xyz_layout(filepath)
+    width = layout["width"]
+    height = layout["height"]
+    source_spacing_um = layout["pixel_spacing_um"]
+    factor = choose_surface_mesh_factor(width, height, bounds=bounds, pixel_spacing_um=source_spacing_um)
+
+    x_start, x_stop = 0, width
+    y_start, y_stop = 0, height
+    if bounds:
+        x1_um, x2_um, y1_um, y2_um = bounds
+        x_start = max(0, min(width - 1, int(min(x1_um, x2_um) / max(source_spacing_um, 1e-9))))
+        x_stop = max(x_start + 1, min(width, int(max(x1_um, x2_um) / max(source_spacing_um, 1e-9))))
+        y_start = max(0, min(height - 1, int(min(y1_um, y2_um) / max(source_spacing_um, 1e-9))))
+        y_stop = max(y_start + 1, min(height, int(max(y1_um, y2_um) / max(source_spacing_um, 1e-9))))
+
+    mesh_width = max(1, (x_stop - x_start + factor - 1) // factor)
+    mesh_height = max(1, (y_stop - y_start + factor - 1) // factor)
+    sums = np.zeros((mesh_height, mesh_width), dtype=float)
+    counts = np.zeros((mesh_height, mesh_width), dtype=np.uint32)
+
+    for raw_x, raw_y, z in iter_xyz_records(filepath, layout["data_start_line"]):
+        if z is None:
+            continue
+
+        if layout["x_index"] is not None and layout["y_index"] is not None:
+            x = layout["x_index"].get(raw_x)
+            y = layout["y_index"].get(raw_y)
+            if x is None or y is None:
+                continue
+        else:
+            x = int(raw_x)
+            y = int(raw_y)
+
+        if not (x_start <= x < x_stop and y_start <= y < y_stop):
+            continue
+
+        mesh_x = (x - x_start) // factor
+        mesh_y = (y - y_start) // factor
+        if 0 <= mesh_x < mesh_width and 0 <= mesh_y < mesh_height:
+            sums[mesh_y, mesh_x] += z
+            counts[mesh_y, mesh_x] += 1
+
+    data = np.full((mesh_height, mesh_width), np.nan, dtype=float)
+    np.divide(sums, counts, out=data, where=counts > 0)
+    return data, counts > 0, {
+        "width": width,
+        "height": height,
+        "mesh_width": mesh_width,
+        "mesh_height": mesh_height,
+        "sample_factor": factor,
+        "pixel_spacing_um": source_spacing_um * factor,
+        "source_pixel_spacing_um": source_spacing_um,
+        "warnings": layout["warnings"],
+        "header_present": layout["header_present"],
+        "coordinate_mode": layout["coordinate_mode"],
+        "bounds_px": [x_start, x_stop, y_start, y_stop],
+    }
+
+
+def adaptive_axis_indices(importance, axis, max_count):
+    length = importance.shape[axis]
+    if length <= max_count:
+        return np.arange(length, dtype=int)
+
+    base_count = min(length, max(16, min(SURFACE_MESH_BASE_AXIS, int(max_count * 0.6))))
+    base = set(np.linspace(0, length - 1, base_count, dtype=int).tolist())
+    scores = np.nanmax(importance, axis=1 if axis == 0 else 0)
+    extra_count = max(0, max_count - len(base))
+
+    for index in np.argsort(scores)[::-1]:
+        for candidate in (int(index), int(index) - 1, int(index) + 1):
+            if 0 <= candidate < length:
+                base.add(candidate)
+            if len(base) >= max_count:
+                break
+        if len(base) >= max_count:
+            break
+
+    return np.array(sorted(base), dtype=int)
+
+
+def select_adaptive_surface_samples(data):
+    max_axis = min(SURFACE_MESH_RENDER_MAX_AXIS, int(np.sqrt(SURFACE_MESH_MAX_VERTICES)))
+    if data.shape[0] * data.shape[1] <= SURFACE_MESH_MAX_VERTICES and max(data.shape) <= max_axis:
+        return np.arange(data.shape[0], dtype=int), np.arange(data.shape[1], dtype=int), "native"
+
+    filled, _ = fill_heightmap_nans(data)
+    grad_y, grad_x = np.gradient(filled)
+    importance = np.sqrt((grad_x ** 2) + (grad_y ** 2))
+
+    rows = adaptive_axis_indices(importance, axis=0, max_count=min(max_axis, data.shape[0]))
+    cols = adaptive_axis_indices(importance, axis=1, max_count=min(max_axis, data.shape[1]))
+    while len(rows) * len(cols) > SURFACE_MESH_MAX_VERTICES:
+        if len(rows) >= len(cols) and len(rows) > 2:
+            rows = rows[::2]
+        elif len(cols) > 2:
+            cols = cols[::2]
+        else:
+            break
+    return rows, cols, "adaptive-gradient"
+
+
+def build_surface_mesh_payload(filepath, filename, bounds=None):
+    data, valid_mask, metadata = load_surface_mesh_grid(filepath, bounds=bounds)
+    filled, finite = fill_heightmap_nans(data)
+    rows, cols, remesh_mode = select_adaptive_surface_samples(filled)
+
+    selected = filled[np.ix_(rows, cols)]
+    selected_valid = valid_mask[np.ix_(rows, cols)]
+    height_values = selected[selected_valid] if selected_valid.any() else selected.ravel()
+    height_min = float(np.min(height_values))
+    height_max = float(np.max(height_values))
+    height_mid = float(np.median(height_values))
+    height_range = max(height_max - height_min, 1e-9)
+    spacing_um = metadata["pixel_spacing_um"]
+    lateral_width_um = max((cols[-1] - cols[0]) * spacing_um, spacing_um)
+    lateral_height_um = max((rows[-1] - rows[0]) * spacing_um, spacing_um)
+    lateral_span_um = max(lateral_width_um, lateral_height_um, spacing_um)
+    relief_scale = (lateral_span_um * 0.18) / height_range
+
+    vertices = []
+    values = []
+    for row in rows:
+        y_um = row * spacing_um - lateral_height_um / 2
+        for col in cols:
+            x_um = col * spacing_um - lateral_width_um / 2
+            z_um = (filled[row, col] - height_mid) * relief_scale
+            vertices.extend([
+                x_um / lateral_span_um,
+                z_um / lateral_span_um,
+                y_um / lateral_span_um,
+            ])
+            values.append((filled[row, col] - height_min) / height_range)
+
+    row_count = len(rows)
+    col_count = len(cols)
+    indices = []
+    for row_index in range(row_count - 1):
+        for col_index in range(col_count - 1):
+            v00 = row_index * col_count + col_index
+            v01 = v00 + 1
+            v10 = (row_index + 1) * col_count + col_index
+            v11 = v10 + 1
+            valid00 = selected_valid[row_index, col_index]
+            valid01 = selected_valid[row_index, col_index + 1]
+            valid10 = selected_valid[row_index + 1, col_index]
+            valid11 = selected_valid[row_index + 1, col_index + 1]
+            if valid00 and valid10 and valid01:
+                indices.extend([v00, v10, v01])
+            if valid01 and valid10 and valid11:
+                indices.extend([v01, v10, v11])
+
+    if not indices:
+        for row_index in range(row_count - 1):
+            for col_index in range(col_count - 1):
+                v00 = row_index * col_count + col_index
+                v01 = v00 + 1
+                v10 = (row_index + 1) * col_count + col_index
+                v11 = v10 + 1
+                indices.extend([v00, v10, v01, v01, v10, v11])
+
+    vertex_array = np.array(vertices, dtype=np.float32).reshape((-1, 3))
+    normals = np.zeros_like(vertex_array)
+    for tri_start in range(0, len(indices), 3):
+        a, b, c = indices[tri_start:tri_start + 3]
+        normal = np.cross(vertex_array[b] - vertex_array[a], vertex_array[c] - vertex_array[a])
+        length = np.linalg.norm(normal)
+        if length > 1e-9:
+            normal = normal / length
+        normals[a] += normal
+        normals[b] += normal
+        normals[c] += normal
+
+    normal_lengths = np.linalg.norm(normals, axis=1)
+    normals[normal_lengths > 1e-9] /= normal_lengths[normal_lengths > 1e-9, None]
+    normals[normal_lengths <= 1e-9] = [0.0, 1.0, 0.0]
+
+    return {
+        "filename": filename,
+        "vertices": [round(float(value), 6) for value in vertex_array.ravel()],
+        "normals": [round(float(value), 6) for value in normals.ravel()],
+        "values": [round(float(value), 6) for value in values],
+        "indices": indices,
+        "metadata": {
+            **metadata,
+            "selected_rows": int(row_count),
+            "selected_cols": int(col_count),
+            "vertex_count": int(vertex_array.shape[0]),
+            "triangle_count": int(len(indices) // 3),
+            "remesh_mode": remesh_mode,
+            "height_min_um": height_min,
+            "height_max_um": height_max,
+            "height_exaggeration": relief_scale,
+            "valid_coverage_percent": round(float(np.count_nonzero(finite) / finite.size * 100.0), 2),
+        },
     }
 
 
@@ -389,6 +619,12 @@ def available_obj_sources(job):
 def find_obj_path(job, source_label):
     output_dir = Path(job["paths"]["output_dir"])
     matches = sorted(output_dir.glob(f"*_{source_label}.obj"))
+    return matches[0] if matches else None
+
+
+def find_input_xyz_path(job):
+    input_dir = Path(job["paths"]["input_dir"])
+    matches = sorted(input_dir.glob("*.xyz"))
     return matches[0] if matches else None
 
 
@@ -800,6 +1036,33 @@ def get_job(job_id):
     if not job:
         return jsonify({"error": "Job not found"}), 404
     return jsonify({"job": job_payload(job)})
+
+
+@app.get("/api/jobs/<job_id>/surface-mesh")
+def get_surface_mesh(job_id):
+    job = manager.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
+    if job["status"] != "completed":
+        return jsonify({"error": "3D surface viewing is available after analysis completes."}), 409
+
+    input_path = find_input_xyz_path(job)
+    if not input_path:
+        return jsonify({"error": "The original XYZ input file is no longer available for this job."}), 404
+
+    try:
+        payload = build_surface_mesh_payload(
+            input_path,
+            job.get("source_name") or input_path.name,
+            bounds=job.get("options", {}).get("bounds"),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception:
+        traceback.print_exc()
+        return jsonify({"error": "Could not build the experimental 3D surface mesh."}), 500
+
+    return jsonify({"mesh": payload})
 
 
 @app.get("/api/jobs/<job_id>/artifacts/<path:filename>")

@@ -21,7 +21,7 @@ ASSUMED_HEADERLESS_PIXEL_SPACING_UM = 0.5
 
 def parse_xyz_record(line):
     """Return an XYZ data tuple from a line, or None if it is not data."""
-    parts = line.strip().split()
+    parts = line.strip().lstrip("\ufeff").split()
     if len(parts) < 3:
         return None
 

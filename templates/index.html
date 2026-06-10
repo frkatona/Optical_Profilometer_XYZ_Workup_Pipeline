@@ -78,9 +78,16 @@
                     <span class="panel-kicker">Input preview</span>
                     <strong id="file-preview-title"></strong>
                     <span id="file-preview-summary"></span>
+                    <span class="file-preview-legend" id="file-preview-legend" hidden>
+                      <span class="legend-swatch no-data"></span>
+                      No Data/NaN
+                      <span class="legend-divider"></span>
+                      Drag preview to set crop
+                    </span>
                   </div>
                   <div class="file-preview-frame is-empty" id="file-preview-frame">
                     <img id="file-preview-image" alt="" hidden>
+                    <div id="file-preview-crop" class="file-preview-crop" hidden></div>
                     <span id="file-preview-placeholder"></span>
                   </div>
                 </div>
@@ -444,6 +451,29 @@
               </div>
             </div>
           </section>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="surface-modal" class="image-modal is-hidden" aria-hidden="true">
+    <div class="image-modal-backdrop" data-surface-close></div>
+    <div class="image-modal-dialog surface-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="surface-modal-title">
+      <div class="image-modal-bar surface-modal-bar">
+        <div>
+          <strong id="surface-modal-title">Experimental 3D surface</strong>
+          <div id="surface-modal-caption" class="muted">Drag to rotate, scroll to zoom.</div>
+        </div>
+        <div class="image-modal-actions">
+          <button type="button" class="panel-collapse" id="surface-reset-view">Reset view</button>
+          <button type="button" class="panel-collapse" id="surface-modal-close">Close</button>
+        </div>
+      </div>
+      <div class="surface-modal-body">
+        <canvas id="surface-canvas" aria-label="Interactive 3D heightmap surface"></canvas>
+        <div class="surface-readout">
+          <strong>Mesh details</strong>
+          <div id="surface-status">No mesh loaded.</div>
+          <div id="surface-mesh-stats" class="surface-chip-grid"></div>
         </div>
       </div>
     </div>

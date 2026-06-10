@@ -44,11 +44,11 @@ The included `docker-bake.hcl` builds the two primary images for `linux/amd64` a
 
 ```powershell
 $env:REGISTRY_IMAGE="anthonykatona/optical-profilometer"
-$env:VERSION="1.1"
+$env:VERSION="1.2"
 docker buildx bake --push
 ```
 
-This publishes `${REGISTRY_IMAGE}:1.1` for the default no-Blender Web UI and `${REGISTRY_IMAGE}:1.1-blender` for the Blender-enabled Web UI.
+This publishes `${REGISTRY_IMAGE}:1.2` and `${REGISTRY_IMAGE}:latest` for the default no-Blender Web UI, plus `${REGISTRY_IMAGE}:1.2-blender` and `${REGISTRY_IMAGE}:latest-blender` for the Blender-enabled Web UI.
 
 ### Optional CLI Targets
 

@@ -176,14 +176,16 @@ The included `docker-bake.hcl` defines the default Web UI image and the Blender-
 
 ```powershell
 $env:REGISTRY_IMAGE="anthonykatona/optical-profilometer"
-$env:VERSION="1.1"
+$env:VERSION="1.2"
 docker buildx bake --push
 ```
 
 This publishes:
 
-- `${REGISTRY_IMAGE}:1.1`
-- `${REGISTRY_IMAGE}:1.1-blender`
+- `${REGISTRY_IMAGE}:1.2`
+- `${REGISTRY_IMAGE}:latest`
+- `${REGISTRY_IMAGE}:1.2-blender`
+- `${REGISTRY_IMAGE}:latest-blender`
 
 ## 6. First Run: Smallest Possible Test
 

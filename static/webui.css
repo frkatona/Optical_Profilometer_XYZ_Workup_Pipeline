@@ -538,10 +538,38 @@ legend {
   white-space: nowrap;
 }
 
-.file-preview-meta span:last-child {
+#file-preview-summary {
   color: var(--muted);
   font-size: 0.86rem;
   line-height: 1.35;
+}
+
+.file-preview-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  border: 1px solid rgba(18, 43, 52, 0.18);
+}
+
+.legend-swatch.no-data {
+  background: #ff5b73;
+}
+
+.legend-divider {
+  width: 1px;
+  height: 14px;
+  margin-inline: 0.15rem;
+  background: var(--line);
 }
 
 .file-preview-frame {
@@ -559,12 +587,31 @@ legend {
   background-size: 16px 16px;
 }
 
+.file-preview-frame.is-croppable {
+  cursor: crosshair;
+}
+
 .file-preview-frame img {
   display: block;
   width: 100%;
   height: 100%;
   min-height: 112px;
   object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+.file-preview-crop {
+  position: absolute;
+  z-index: 2;
+  border: 2px solid #ffffff;
+  border-radius: 7px;
+  background: rgba(255, 91, 115, 0.18);
+  box-shadow:
+    0 0 0 1px rgba(12, 36, 56, 0.78),
+    0 0 0 9999px rgba(8, 18, 28, 0.18);
+  pointer-events: none;
 }
 
 .file-preview-frame span {
@@ -1351,6 +1398,31 @@ button:disabled {
   padding: 0.45rem 0.8rem;
 }
 
+.surface-explorer-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid #cfe0f2;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(37, 136, 244, 0.11), transparent 34%),
+    linear-gradient(135deg, #ffffff 0%, #f5faff 100%);
+}
+
+.surface-explorer-card strong,
+.surface-explorer-card span {
+  display: block;
+}
+
+.surface-explorer-card span {
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
 .log-panel {
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -1534,6 +1606,84 @@ button:disabled {
   background: #ffffff;
 }
 
+.surface-modal-dialog {
+  width: min(96vw, 1500px);
+  max-height: 94vh;
+  background: #101820;
+}
+
+.surface-modal-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  min-height: min(74vh, 820px);
+  background:
+    radial-gradient(circle at 18% 12%, rgba(37, 136, 244, 0.16), transparent 30%),
+    radial-gradient(circle at 72% 88%, rgba(45, 155, 77, 0.12), transparent 34%),
+    #0d151d;
+}
+
+#surface-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 520px;
+  cursor: grab;
+  touch-action: none;
+}
+
+#surface-canvas.is-dragging {
+  cursor: grabbing;
+}
+
+.surface-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(243, 247, 251, 0.9);
+}
+
+.surface-readout strong {
+  color: #ffffff;
+}
+
+#surface-status {
+  color: rgba(243, 247, 251, 0.72);
+  line-height: 1.45;
+}
+
+.surface-chip-grid {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.surface-chip {
+  padding: 0.65rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.surface-chip span,
+.surface-chip strong {
+  display: block;
+}
+
+.surface-chip span {
+  color: rgba(243, 247, 251, 0.62);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.surface-chip strong {
+  margin-top: 0.18rem;
+  color: #ffffff;
+  font-size: 0.92rem;
+}
+
 body.modal-open {
   overflow: hidden;
 }
@@ -1561,6 +1711,15 @@ body.modal-open {
 
   .render-preview-modal-grid {
     grid-template-columns: 1fr;
+  }
+
+  .surface-modal-body {
+    grid-template-columns: 1fr;
+  }
+
+  .surface-readout {
+    border-left: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
   }
 }
 
@@ -1596,6 +1755,7 @@ body.modal-open {
   .panel-heading,
   .page-header-actions,
   .artifact-item,
+  .surface-explorer-card,
   .render-preview-header,
   .render-preview-card-head {
     flex-direction: column;

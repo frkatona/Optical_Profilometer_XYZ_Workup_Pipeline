@@ -3,7 +3,7 @@ variable "REGISTRY_IMAGE" {
 }
 
 variable "VERSION" {
-  default = "1.1"
+  default = "1.2"
 }
 
 group "default" {
@@ -14,7 +14,7 @@ target "web-ui" {
   context = "."
   dockerfile = "Dockerfile"
   platforms = ["linux/amd64", "linux/arm64"]
-  tags = ["${REGISTRY_IMAGE}:${VERSION}"]
+  tags = ["${REGISTRY_IMAGE}:${VERSION}", "${REGISTRY_IMAGE}:latest"]
 }
 
 target "blender" {
@@ -22,5 +22,5 @@ target "blender" {
   dockerfile = "Dockerfile"
   target = "blender"
   platforms = ["linux/amd64", "linux/arm64"]
-  tags = ["${REGISTRY_IMAGE}:${VERSION}-blender"]
+  tags = ["${REGISTRY_IMAGE}:${VERSION}-blender", "${REGISTRY_IMAGE}:latest-blender"]
 }
