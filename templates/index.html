@@ -3,19 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Optical Profilometry Workbench</title>
+  <title>Optical Profilometry Pipeline</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='webui.css') }}">
 </head>
 <body>
   <header class="global-bar">
     <div class="global-brand">
-      <span class="suite-name">Optical Profilometry</span>
-      <span class="brand-divider"></span>
-      <span class="product-name">Workbench</span>
-    </div>
-    <div class="global-actions">
-      <span class="ghost-chip">Docker Web UI</span>
-      <span class="ghost-chip">Pipeline Console</span>
+      <span class="suite-name">Optical Profilometry Pipeline</span>
     </div>
   </header>
 
@@ -23,37 +17,27 @@
     <aside class="sidebar" id="left-sidebar">
       <div class="sidebar-head">
         <div class="sidebar-brand">
-          <div class="sidebar-mark">OP</div>
           <div class="sidebar-brand-copy">
-            <strong>profilometry</strong>
             <span>surface analysis queue</span>
           </div>
         </div>
-        <button type="button" class="sidebar-toggle" id="toggle-sidebar" aria-expanded="true" aria-label="Collapse navigation rail">Fold</button>
+        <button type="button" class="sidebar-toggle" id="toggle-sidebar" aria-expanded="true" aria-label="Collapse navigation rail">&larr;</button>
       </div>
 
-      <nav class="sidebar-nav" aria-label="Workbench sections">
-        <button type="button" class="nav-item active" id="focus-form" data-short-label="Create" title="Create Job">Create Job</button>
-        <button type="button" class="nav-item" id="focus-jobs" data-short-label="Jobs" title="Jobs">Jobs</button>
-        <button type="button" class="nav-item" id="focus-detail" data-short-label="Detail" title="Pipeline Detail">Pipeline Detail</button>
-      </nav>
-
       <section class="sidebar-stack">
-        <div class="sidebar-card">
-          <span class="sidebar-label">Workers</span>
-          <strong>{{ max_workers }}</strong>
-          <p>Parallel job slots available inside this container.</p>
-        </div>
         <div class="sidebar-card">
           <span class="sidebar-label">Blender</span>
           <strong>{% if blender_available %}Ready{% else %}Unavailable{% endif %}</strong>
           <p>{% if blender_available %}The web image can render OBJ outputs directly.{% else %}Blender rendering is not installed in this runtime.{% endif %}</p>
         </div>
-        <div class="sidebar-card">
-          <span class="sidebar-label">Output location</span>
-          <strong>`WEBUI_DATA_DIR/&lt;job-id&gt;/output`</strong>
-          <p>Rendered images, CSVs, OBJ files, and previews stay in each job folder.</p>
+      </section>
+
+      <section class="sidebar-jobs" aria-label="Job selector">
+        <div class="sidebar-jobs-head">
+          <span class="sidebar-label">Job selector</span>
+          <button type="button" class="sidebar-refresh" id="refresh-jobs">Refresh</button>
         </div>
+        <div id="jobs-list" class="job-list sidebar-job-list"></div>
       </section>
     </aside>
 
@@ -61,10 +45,6 @@
       <section class="page-header">
         <div class="breadcrumbs">Pipelines / Surface Analysis</div>
         <div class="page-header-row">
-          <div>
-            <h1>Profilometry Pipeline</h1>
-            <p>Load XYZ data, set analysis preferences, monitor progress, and optionally render exported surfaces.</p>
-          </div>
           <div class="page-header-actions">
             <div class="header-badges">
               <span class="status-badge neutral">1x default sampling</span>
@@ -72,31 +52,6 @@
                 Blender {% if blender_available %}available{% else %}offline{% endif %}
               </span>
             </div>
-            <button type="button" class="secondary-button" id="refresh-jobs">Refresh</button>
-          </div>
-        </div>
-      </section>
-
-      <section class="status-strip">
-        <div class="status-tile">
-          <span class="status-dot live"></span>
-          <div>
-            <strong>Live queue</strong>
-            <span>Polling every 1.5 seconds</span>
-          </div>
-        </div>
-        <div class="status-tile">
-          <span class="status-dot queued"></span>
-          <div>
-            <strong>Job outputs</strong>
-            <span>TXT, CSV, PNG, OBJ, and Blender render artifacts</span>
-          </div>
-        </div>
-        <div class="status-tile">
-          <span class="status-dot detail"></span>
-          <div>
-            <strong>Reference mode</strong>
-            <span>Databricks-inspired split layout with a dedicated event stream</span>
           </div>
         </div>
       </section>
@@ -105,79 +60,85 @@
         <section class="panel form-panel" id="form-panel">
           <div class="panel-heading">
             <div>
-              <span class="panel-kicker">Create</span>
               <h2>New Job</h2>
             </div>
-            <p>Choose an XYZ source, tune analysis options, and optionally queue a Blender render step.</p>
           </div>
 
           <form id="job-form">
             <div class="form-grid">
-              <label>
-                <span>XYZ file</span>
-                <input type="file" name="input_file" accept=".xyz">
-              </label>
-
-              <div class="file-preview-card" id="file-preview-card">
-                <div class="file-preview-meta">
-                  <span class="panel-kicker">Input preview</span>
-                  <strong id="file-preview-title">No file loaded</strong>
-                  <span id="file-preview-summary">Choose an XYZ file to render a lightweight heightmap preview here.</span>
-                </div>
-                <div class="file-preview-frame is-empty" id="file-preview-frame">
-                  <img id="file-preview-image" alt="Selected XYZ heightmap preview" hidden>
-                  <span id="file-preview-placeholder">Awaiting file</span>
-                </div>
-              </div>
-
-              <label>
-                <span>Resolution factor</span>
-                <select name="resolution_factor">
-                  <option value="1" selected>1x</option>
-                  <option value="2">2x</option>
-                  <option value="4">4x</option>
-                  <option value="8">8x</option>
-                  <option value="16">16x</option>
-                  <option value="32">32x</option>
-                </select>
-              </label>
-
-              <label>
-                <span>Interpolation</span>
-                <select name="interpolate">
-                  <option value="bilinear" selected>Bilinear</option>
-                  <option value="laplacian">Laplacian</option>
-                  <option value="kriging">Kriging</option>
-                </select>
-              </label>
-
-              <label class="checkbox">
-                <input type="checkbox" name="stats_only">
-                <span>Stats only</span>
-              </label>
-            </div>
-
-            <fieldset>
-              <legend>Crop bounds in microns</legend>
-              <div class="form-grid compact">
-                <label><span>X1</span><input type="number" step="any" name="bound_x1"></label>
-                <label><span>X2</span><input type="number" step="any" name="bound_x2"></label>
-                <label><span>Y1</span><input type="number" step="any" name="bound_y1"></label>
-                <label><span>Y2</span><input type="number" step="any" name="bound_y2"></label>
-              </div>
-            </fieldset>
-
-            <fieldset>
-              <legend>OBJ exports</legend>
-              <div class="checkbox-grid">
-                {% for export_map in export_maps %}
-                <label class="checkbox">
-                  <input type="checkbox" name="export_obj" value="{{ export_map }}" {% if export_map == 'roughness' %}checked{% endif %}>
-                  <span>{{ export_map }}</span>
+              <div class="file-intake" id="file-intake">
+                <label class="file-dropzone" id="file-dropzone">
+                  <input class="file-dropzone-input" type="file" name="input_file" accept=".xyz">
+                  <strong id="file-dropzone-title">Drop data here</strong>
+                  <span id="file-dropzone-summary">or click to choose .xyz data from your computer</span>
                 </label>
-                {% endfor %}
+
+                <div class="file-preview-card" id="file-preview-card">
+                  <div class="file-preview-meta">
+                    <span class="panel-kicker">Input preview</span>
+                    <strong id="file-preview-title"></strong>
+                    <span id="file-preview-summary"></span>
+                  </div>
+                  <div class="file-preview-frame is-empty" id="file-preview-frame">
+                    <img id="file-preview-image" alt="" hidden>
+                    <span id="file-preview-placeholder"></span>
+                  </div>
+                </div>
               </div>
-            </fieldset>
+
+              <details class="analysis-options">
+                <summary>Analysis options</summary>
+                <div class="form-grid">
+                  <label>
+                    <span>Resolution factor</span>
+                    <select name="resolution_factor">
+                      <option value="1" selected>1x</option>
+                      <option value="2">2x</option>
+                      <option value="4">4x</option>
+                      <option value="8">8x</option>
+                      <option value="16">16x</option>
+                      <option value="32">32x</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    <span>Interpolation</span>
+                    <select name="interpolate">
+                      <option value="bilinear" selected>Bilinear</option>
+                      <option value="laplacian">Laplacian</option>
+                      <option value="kriging">Kriging</option>
+                    </select>
+                  </label>
+
+                  <label class="checkbox">
+                    <input type="checkbox" name="stats_only">
+                    <span>Stats only</span>
+                  </label>
+                </div>
+
+                <fieldset>
+                  <legend>Crop bounds in microns</legend>
+                  <div class="form-grid compact">
+                    <label><span>X1</span><input type="number" step="any" name="bound_x1"></label>
+                    <label><span>X2</span><input type="number" step="any" name="bound_x2"></label>
+                    <label><span>Y1</span><input type="number" step="any" name="bound_y1"></label>
+                    <label><span>Y2</span><input type="number" step="any" name="bound_y2"></label>
+                  </div>
+                </fieldset>
+
+                <fieldset>
+                  <legend>OBJ exports</legend>
+                  <div class="checkbox-grid">
+                    {% for export_map in export_maps %}
+                    <label class="checkbox">
+                      <input type="checkbox" name="export_obj" value="{{ export_map }}" {% if export_map == 'roughness' %}checked{% endif %}>
+                      <span>{{ export_map }}</span>
+                    </label>
+                    {% endfor %}
+                  </div>
+                </fieldset>
+              </details>
+            </div>
 
             <fieldset id="render-fieldset" class="render-fieldset" {% if not blender_available %}data-disabled="true"{% endif %}>
               <legend>Blender render extension</legend>
@@ -329,39 +290,26 @@
               </div>
             </fieldset>
 
-            <div class="actions">
-              <button type="submit" id="submit-button">Start job</button>
-              <button type="button" class="secondary-button" id="load-render-settings" disabled>Load selected render settings</button>
-              <button type="button" class="secondary-button" id="rerender-button" disabled>Rerun selected render only</button>
-            </div>
-            <div class="action-note">
-              <span id="submit-status" class="muted"></span>
-              <span id="rerender-hint" class="muted">Select a completed job with an OBJ export to reuse its existing mesh.</span>
+            <div class="floating-actions">
+              <div class="actions">
+                <button type="submit" id="submit-button">Start job</button>
+                <button type="button" class="secondary-button" id="load-render-settings" disabled>Load selected render settings</button>
+                <button type="button" class="secondary-button" id="rerender-button" disabled>Rerun selected render only</button>
+              </div>
+              <div id="fixed-progress" class="fixed-progress is-empty"></div>
+              <div class="action-note">
+                <span id="submit-status" class="muted"></span>
+                <span id="rerender-hint" class="muted">Select a completed job with an OBJ export to reuse its existing mesh.</span>
+              </div>
             </div>
           </form>
-        </section>
-
-        <section class="panel jobs-panel" id="jobs-panel">
-          <div class="panel-heading">
-            <div>
-              <span class="panel-kicker">Queue</span>
-              <h2>Jobs</h2>
-            </div>
-            <div class="panel-tools">
-              <p>Every card below represents an isolated working directory under the web UI data path.</p>
-              <button type="button" class="panel-collapse" id="toggle-jobs-panel" aria-expanded="true">Fold</button>
-            </div>
-          </div>
-          <div id="jobs-list" class="job-list"></div>
         </section>
 
         <section class="panel detail-panel" id="detail-panel">
           <div class="panel-heading">
             <div>
-              <span class="panel-kicker">Monitor</span>
-              <h2>Pipeline Detail</h2>
+              <h2>Analysis Results</h2>
             </div>
-            <p>Watch status, inspect metrics, review outputs, and follow the event stream without losing your scroll position.</p>
           </div>
           <div id="job-detail" class="empty-state">Select a job to see progress, stats, previews, and downloads.</div>
         </section>

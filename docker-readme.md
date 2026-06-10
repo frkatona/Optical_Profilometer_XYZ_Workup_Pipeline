@@ -175,15 +175,15 @@ docker build --target runtime -t optical-profilometer-cli .
 The included `docker-bake.hcl` defines the default Web UI image and the Blender-enabled Web UI image for `linux/amd64` and `linux/arm64`.
 
 ```powershell
-$env:REGISTRY_IMAGE="your-dockerhub-user/optical-profilometer"
-$env:VERSION="1.0"
+$env:REGISTRY_IMAGE="anthonykatona/optical-profilometer"
+$env:VERSION="1.1"
 docker buildx bake --push
 ```
 
 This publishes:
 
-- `${REGISTRY_IMAGE}:1.0`
-- `${REGISTRY_IMAGE}:1.0-blender`
+- `${REGISTRY_IMAGE}:1.1`
+- `${REGISTRY_IMAGE}:1.1-blender`
 
 ## 6. First Run: Smallest Possible Test
 

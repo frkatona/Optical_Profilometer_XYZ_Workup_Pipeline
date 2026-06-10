@@ -15,6 +15,169 @@ from scipy.ndimage import gaussian_filter, generic_filter, laplace
 from scipy.signal import correlate2d
 from tqdm import tqdm
 
+XYZ_HEADER_LINE_COUNT = 14
+ASSUMED_HEADERLESS_PIXEL_SPACING_UM = 0.5
+
+
+def parse_xyz_record(line):
+    """Return an XYZ data tuple from a line, or None if it is not data."""
+    parts = line.strip().split()
+    if len(parts) < 3:
+        return None
+
+    try:
+        x_value = float(parts[0])
+        y_value = float(parts[1])
+    except ValueError:
+        return None
+
+    if not np.isfinite(x_value) or not np.isfinite(y_value):
+        return None
+
+    if parts[2] == "No" and len(parts) > 3 and parts[3] == "Data":
+        return x_value, y_value, None
+
+    try:
+        z_value = float(parts[2])
+    except ValueError:
+        return None
+
+    return x_value, y_value, z_value
+
+
+def iter_xyz_records(filepath, skip_lines=0):
+    """Yield parsed XYZ records, optionally skipping a fixed metadata header."""
+    with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+        for _ in range(skip_lines):
+            f.readline()
+        for line in f:
+            record = parse_xyz_record(line)
+            if record is not None:
+                yield record
+
+
+def has_metadata_header(filepath):
+    """Detect whether the file starts with metadata or raw XYZ rows."""
+    with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+        probe_lines = [f.readline().strip() for _ in range(XYZ_HEADER_LINE_COUNT)]
+
+    try:
+        dim_parts = probe_lines[3].split()
+        width = int(dim_parts[2])
+        height = int(dim_parts[3])
+        if width > 0 and height > 0:
+            return True
+    except (IndexError, ValueError):
+        pass
+
+    for line in probe_lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        return parse_xyz_record(stripped) is None
+    return True
+
+
+def infer_headerless_layout(filepath):
+    """Infer grid dimensions for files that contain raw XYZ rows only."""
+    x_values = set()
+    y_values = set()
+    record_count = 0
+
+    for x_value, y_value, _ in iter_xyz_records(filepath):
+        x_values.add(x_value)
+        y_values.add(y_value)
+        record_count += 1
+
+    if not record_count or not x_values or not y_values:
+        raise ValueError("Could not infer XYZ dimensions from headerless data rows.")
+
+    sorted_x = sorted(x_values)
+    sorted_y = sorted(y_values)
+    width = len(sorted_x)
+    height = len(sorted_y)
+    warning = (
+        "XYZ metadata header not found. Inferred a "
+        f"{width}x{height} grid from observed X/Y coordinates and assumed "
+        f"{ASSUMED_HEADERLESS_PIXEL_SPACING_UM:.3f} um/pixel lateral sampling. "
+        "Scale-dependent metrics and crop bounds are approximate."
+    )
+
+    return {
+        'header_present': False,
+        'header': [],
+        'data_start_line': 0,
+        'width': width,
+        'height': height,
+        'pixel_spacing_um': ASSUMED_HEADERLESS_PIXEL_SPACING_UM,
+        'wavelength': None,
+        'coherence_flag': None,
+        'timestamp': None,
+        'warnings': [warning],
+        'x_index': {value: index for index, value in enumerate(sorted_x)},
+        'y_index': {value: index for index, value in enumerate(sorted_y)},
+        'coordinate_mode': 'inferred',
+    }
+
+
+def inspect_xyz_layout(filepath):
+    """Read XYZ metadata when present, or infer placeholder metadata when absent."""
+    if not has_metadata_header(filepath):
+        return infer_headerless_layout(filepath)
+
+    header_lines = []
+    with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+        for _ in range(XYZ_HEADER_LINE_COUNT):
+            header_lines.append(f.readline().strip())
+
+    warnings = []
+
+    try:
+        dim_parts = header_lines[3].split()
+        width = int(dim_parts[2])
+        height = int(dim_parts[3])
+    except (IndexError, ValueError):
+        warning = "Could not parse dimensions from header line 4. Defaulting to 1024x1024."
+        warnings.append(warning)
+        width, height = 1024, 1024
+
+    try:
+        parts = header_lines[7].split()
+        if len(parts) >= 8:
+            pixel_spacing_um = float(parts[6]) * (10 ** 6)
+            wavelength = float(parts[3])
+            coherence_flag = int(parts[4])
+            timestamp = int(parts[7])
+        else:
+            raise ValueError(f"Insufficient values in header line 8: {len(parts)} < 8")
+    except (ValueError, IndexError) as e:
+        warning = (
+            f"Could not parse header line 8: {e}. "
+            f"Using assumed {ASSUMED_HEADERLESS_PIXEL_SPACING_UM:.3f} um/pixel lateral sampling."
+        )
+        warnings.append(warning)
+        pixel_spacing_um = ASSUMED_HEADERLESS_PIXEL_SPACING_UM
+        wavelength = None
+        coherence_flag = None
+        timestamp = None
+
+    return {
+        'header_present': True,
+        'header': header_lines,
+        'data_start_line': XYZ_HEADER_LINE_COUNT,
+        'width': width,
+        'height': height,
+        'pixel_spacing_um': pixel_spacing_um,
+        'wavelength': wavelength,
+        'coherence_flag': coherence_flag,
+        'timestamp': timestamp,
+        'warnings': warnings,
+        'x_index': None,
+        'y_index': None,
+        'coordinate_mode': 'header',
+    }
+
+
 def load_xyz_file(filepath, resolution_factor=1):
     """
     Load XYZ profilometry data from file.
@@ -37,84 +200,37 @@ def load_xyz_file(filepath, resolution_factor=1):
     print(f"Resolution factor: {resolution_factor}x")
     
     start_time = time.time()
-    
-    # Read the file
-    header_lines = []
-    with open(filepath, 'r') as f:
-        # Read header (14 lines)
-        for i in range(14):
-            header_lines.append(f.readline().strip())
-    
-    # Parse array dimensions from header line 4 (index 3)
-    # Format: reserved reserved width height
-    try:
-        dim_parts = header_lines[3].split()
-        width = int(dim_parts[2])
-        height = int(dim_parts[3])
-    except (IndexError, ValueError):
-        print("Warning: Could not parse dimensions from header line 4. Defaulting to 1024x1024.")
-        width, height = 1024, 1024
+
+    layout = inspect_xyz_layout(filepath)
+    for warning in layout['warnings']:
+        print(f"Warning: {warning}")
+
+    header_lines = layout['header']
+    width = layout['width']
+    height = layout['height']
+    pixel_spacing_um = layout['pixel_spacing_um']
+    wavelength = layout['wavelength']
+    coherence_flag = layout['coherence_flag']
+    timestamp = layout['timestamp']
 
     # Initialize array with dynamic dimensions
     full_data = np.full((height, width), np.nan)
-    
-    # Parse pixel spacing from header line 8 (0-indexed line 7)
-    # 7th element is m/pixel
-    try:
-        parts = header_lines[7].split()
-        if len(parts) >= 8:
-            # Value 7: Lateral sampling (um per pixel) (from Ben's repo, supposedly from the Zygo manual)
-            pixel_spacing_um = float(parts[6])*(10**6)
-            
-            # Value 4: Wavelength/modulation parameter (maybe?)
-            wavelength = float(parts[3])
-            
-            # Value 5: Coherence flag (maybe?)
-            coherence_flag = int(parts[4])
-            
-            # Value 8: Unix timestamp (checks out)
-            timestamp = int(parts[7])
+
+    for raw_x, raw_y, z_microns in iter_xyz_records(filepath, layout['data_start_line']):
+        if z_microns is None:
+            continue
+
+        if layout['x_index'] is not None and layout['y_index'] is not None:
+            x = layout['x_index'].get(raw_x)
+            y = layout['y_index'].get(raw_y)
+            if x is None or y is None:
+                continue
         else:
-            raise ValueError(f"Insufficient values in header line 8: {len(parts)} < 8")
-    except (ValueError, IndexError) as e:
-        print(f"Warning: Could not parse header line 8: {e}")
-        print(f"Using default values")
-        pixel_spacing_um = 0.5  # Default estimate from line 8 index 1
-        wavelength = None
-        coherence_flag = None
-        timestamp = None
-    
-    # Read the data (re-opening file to read after header)
-    with open(filepath, 'r') as f:
-        # Skip header
-        for _ in range(14):
-            f.readline()
-            
-        # Parse data lines
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-                
-            parts = line.split()
-            if len(parts) < 3:
-                continue
-            
-            x = int(parts[0])
-            y = int(parts[1])
-            
-            # Check if data is valid
-            if parts[2] == "No" and len(parts) > 3 and parts[3] == "Data":
-                # No data point
-                continue
-            else:
-                try:
-                    # User specified: z column values are already in microns
-                    z_microns = float(parts[2])
-                    if 0 <= y < height and 0 <= x < width:
-                        full_data[y, x] = z_microns
-                except (ValueError, IndexError):
-                    continue
+            x = int(raw_x)
+            y = int(raw_y)
+
+        if 0 <= y < height and 0 <= x < width:
+            full_data[y, x] = z_microns
     
     # Downsampling
     if resolution_factor > 1:
@@ -167,7 +283,10 @@ def load_xyz_file(filepath, resolution_factor=1):
         'pixel_spacing_um': pixel_spacing_um,
         'wavelength': wavelength,
         'coherence_flag': coherence_flag,
-        'timestamp': timestamp
+        'timestamp': timestamp,
+        'header_present': layout['header_present'],
+        'warnings': layout['warnings'],
+        'coordinate_mode': layout['coordinate_mode'],
     }
     
     return data, metadata
@@ -969,6 +1088,10 @@ def write_statistics_text(metadata, stats, output_path):
             from datetime import datetime
             dt = datetime.fromtimestamp(metadata['timestamp'])
             f.write(f"Acquisition Time: {dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        if metadata.get('warnings'):
+            f.write("\nWarnings:\n")
+            for warning in metadata['warnings']:
+                f.write(f"  - {warning}\n")
         f.write(f"\n{'='*60}\n")
         f.write("STATISTICAL ANALYSIS\n")
         f.write(f"{'='*60}\n\n")
@@ -1012,6 +1135,9 @@ def write_statistics_csv(metadata, stats, output_path):
         'wavelength': metadata['wavelength'],
         'coherence_flag': metadata['coherence_flag'],
         'timestamp': metadata['timestamp'],
+        'header_present': metadata.get('header_present'),
+        'coordinate_mode': metadata.get('coordinate_mode'),
+        'warnings': " | ".join(metadata.get('warnings', [])),
     }
     row.update(stats)
 

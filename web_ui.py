@@ -20,7 +20,7 @@ from matplotlib.figure import Figure
 import numpy as np
 from werkzeug.utils import secure_filename
 
-from analyze_heightmap import run_analysis_pipeline
+from analyze_heightmap import inspect_xyz_layout, iter_xyz_records, run_analysis_pipeline
 
 
 APP_ROOT = Path(__file__).resolve().parent
@@ -28,6 +28,7 @@ DEFAULT_DATA_DIR = Path(os.environ.get("WEBUI_DATA_DIR", APP_ROOT / "webui_data"
 DEFAULT_MAX_WORKERS = int(os.environ.get("WEBUI_MAX_WORKERS", "2"))
 AVAILABLE_EXPORT_MAPS = ["raw", "form", "roughness", "waviness+roughness"]
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
+PREVIEW_MAX_DIMENSION = 128
 BENIGN_WORKBENCH_LINES = {
     "EGL Error (0x3009): EGL_BAD_MATCH: Arguments are inconsistent (for example, a valid context requires buffers not supplied by a valid surface)."
 }
@@ -41,60 +42,41 @@ def blender_available():
     return blender_executable() is not None
 
 
-def read_xyz_dimensions(filepath):
-    header_lines = []
-    with open(filepath, "r", encoding="utf-8", errors="replace") as handle:
-        for _ in range(14):
-            header_lines.append(handle.readline().strip())
-
-    try:
-        dim_parts = header_lines[3].split()
-        width = int(dim_parts[2])
-        height = int(dim_parts[3])
-    except (IndexError, ValueError) as exc:
-        raise ValueError("Could not parse XYZ dimensions from header line 4.") from exc
-
-    if width <= 0 or height <= 0:
-        raise ValueError("XYZ dimensions must be positive.")
-
-    return width, height
-
-
 def preview_resolution_factor(width, height):
-    for factor in (64, 32, 16, 8, 4, 2):
-        if width // factor >= 24 and height // factor >= 24:
-            return factor
-    return 1
+    largest_dimension = max(width, height)
+    if largest_dimension <= PREVIEW_MAX_DIMENSION:
+        return 1
+    return max(1, (largest_dimension + PREVIEW_MAX_DIMENSION - 1) // PREVIEW_MAX_DIMENSION)
 
 
 def load_xyz_preview(filepath):
-    width, height = read_xyz_dimensions(filepath)
+    layout = inspect_xyz_layout(filepath)
+    width = layout["width"]
+    height = layout["height"]
     factor = preview_resolution_factor(width, height)
     preview_width = max(1, (width + factor - 1) // factor)
     preview_height = max(1, (height + factor - 1) // factor)
     sums = np.zeros((preview_height, preview_width), dtype=float)
     counts = np.zeros((preview_height, preview_width), dtype=np.uint32)
 
-    with open(filepath, "r", encoding="utf-8", errors="replace") as handle:
-        for _ in range(14):
-            handle.readline()
+    for raw_x, raw_y, z in iter_xyz_records(filepath, layout["data_start_line"]):
+        if z is None:
+            continue
 
-        for line in handle:
-            parts = line.split()
-            if len(parts) < 3 or (parts[2] == "No" and len(parts) > 3 and parts[3] == "Data"):
+        if layout["x_index"] is not None and layout["y_index"] is not None:
+            x = layout["x_index"].get(raw_x)
+            y = layout["y_index"].get(raw_y)
+            if x is None or y is None:
                 continue
-            try:
-                x = int(parts[0])
-                y = int(parts[1])
-                z = float(parts[2])
-            except ValueError:
-                continue
+        else:
+            x = int(raw_x)
+            y = int(raw_y)
 
-            preview_x = x // factor
-            preview_y = y // factor
-            if 0 <= preview_x < preview_width and 0 <= preview_y < preview_height:
-                sums[preview_y, preview_x] += z
-                counts[preview_y, preview_x] += 1
+        preview_x = x // factor
+        preview_y = y // factor
+        if 0 <= preview_x < preview_width and 0 <= preview_y < preview_height:
+            sums[preview_y, preview_x] += z
+            counts[preview_y, preview_x] += 1
 
     data = np.full((preview_height, preview_width), np.nan, dtype=float)
     np.divide(sums, counts, out=data, where=counts > 0)
@@ -105,6 +87,9 @@ def load_xyz_preview(filepath):
         "preview_height": preview_height,
         "resolution_factor": factor,
         "sampled_points": int(counts.sum()),
+        "warnings": layout["warnings"],
+        "header_present": layout["header_present"],
+        "coordinate_mode": layout["coordinate_mode"],
     }
 
 
@@ -122,7 +107,7 @@ def render_preview_payload(filepath, filename):
         if vmin == vmax:
             vmax = vmin + 1.0
 
-    fig = Figure(figsize=(3.1, 2.1), dpi=96)
+    fig = Figure(figsize=(1.28, 1.28), dpi=100)
     fig.patch.set_facecolor("#f6f9fc")
     axis = fig.subplots()
     axis.imshow(data, cmap="viridis", interpolation="nearest", aspect="auto", vmin=vmin, vmax=vmax)
@@ -146,6 +131,9 @@ def render_preview_payload(filepath, filename):
         "coverage_percent": round(coverage, 1),
         "z_min": float(np.min(values)),
         "z_max": float(np.max(values)),
+        "warnings": metadata["warnings"],
+        "header_present": metadata["header_present"],
+        "coordinate_mode": metadata["coordinate_mode"],
     }
 
 

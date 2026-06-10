@@ -5,7 +5,6 @@ const state = {
   pollHandle: null,
   ui: {
     sidebarCollapsed: false,
-    jobsCollapsed: false,
     detailSections: {
       stats: false,
       artifacts: false,
@@ -176,13 +175,6 @@ function restoreLogScrollState(container, sameJob) {
   bindLogScrollTracking(container);
 }
 
-function scrollPanelIntoView(id) {
-  const element = document.getElementById(id);
-  if (element) {
-    element.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-}
-
 function getSelectedJob() {
   return state.jobs.find((job) => job.id === state.selectedJobId) || null;
 }
@@ -205,17 +197,42 @@ function setFilePreviewState({ mode = "empty", title, summary, imageUrl, placeho
   const placeholderNode = document.getElementById("file-preview-placeholder");
   const titleNode = document.getElementById("file-preview-title");
   const summaryNode = document.getElementById("file-preview-summary");
+  const dropzone = document.getElementById("file-dropzone");
+  const dropzoneTitle = document.getElementById("file-dropzone-title");
+  const dropzoneSummary = document.getElementById("file-dropzone-summary");
 
   if (!card || !frame || !image || !placeholderNode || !titleNode || !summaryNode) return;
 
   card.classList.toggle("is-error", mode === "error");
+  card.classList.toggle("is-ready", mode === "ready");
+  card.classList.toggle("is-visible", mode !== "empty");
   frame.classList.toggle("is-loading", mode === "loading");
   frame.classList.toggle("is-empty", !imageUrl);
+  if (dropzone) {
+    dropzone.classList.toggle("has-file", mode === "ready" || mode === "loading");
+    dropzone.classList.toggle("is-error", mode === "error");
+  }
 
-  titleNode.textContent = title || "No file loaded";
-  summaryNode.textContent = summary || "Choose an XYZ file to render a lightweight heightmap preview here.";
-  placeholderNode.textContent = placeholder || (mode === "loading" ? "Rendering preview" : "Awaiting file");
+  titleNode.textContent = title || "";
+  summaryNode.textContent = summary || "";
+  placeholderNode.textContent = placeholder || (mode === "loading" ? "Rendering preview" : "");
   placeholderNode.hidden = Boolean(imageUrl) || mode === "loading";
+
+  if (dropzoneTitle && dropzoneSummary) {
+    if (mode === "ready") {
+      dropzoneTitle.textContent = title || "Data loaded";
+      dropzoneSummary.textContent = "Ready to start a job, or drop different .xyz data to replace it.";
+    } else if (mode === "loading") {
+      dropzoneTitle.textContent = title || "Data selected";
+      dropzoneSummary.textContent = "Rendering a quick preview...";
+    } else if (mode === "error") {
+      dropzoneTitle.textContent = title || "File could not be loaded";
+      dropzoneSummary.textContent = summary || "Drop valid .xyz data or click to choose another source.";
+    } else {
+      dropzoneTitle.textContent = "Drop data here";
+      dropzoneSummary.textContent = "or click to choose .xyz data from your computer";
+    }
+  }
 
   if (imageUrl) {
     image.src = imageUrl;
@@ -230,16 +247,17 @@ function resetFilePreview() {
   state.filePreviewToken += 1;
   setFilePreviewState({
     mode: "empty",
-    title: "No file loaded",
-    summary: "Choose an XYZ file to render a lightweight heightmap preview here.",
-    placeholder: "Awaiting file",
+    title: "",
+    summary: "",
+    placeholder: "",
   });
 }
 
 function describeFilePreview(preview) {
   const sourceSize = `${preview.width} x ${preview.height}`;
   const previewSize = `${preview.preview_width} x ${preview.preview_height}`;
-  return `${sourceSize} source, ${previewSize} preview, ${formatPercent(preview.coverage_percent)} coverage, ${preview.resolution_factor}x downsample.`;
+  const warning = preview.warnings?.length ? ` Warning: ${preview.warnings[0]}` : "";
+  return `${sourceSize} source, ${previewSize} preview, ${formatPercent(preview.coverage_percent)} coverage, ${preview.resolution_factor}x downsample.${warning}`;
 }
 
 async function previewSelectedFile() {
@@ -287,6 +305,53 @@ async function previewSelectedFile() {
   }
 }
 
+function assignDroppedFile(input, file) {
+  if (!input || !file) return false;
+  const transfer = new DataTransfer();
+  transfer.items.add(file);
+  input.files = transfer.files;
+  return true;
+}
+
+function bindFileDropzone() {
+  const dropzone = document.getElementById("file-dropzone");
+  const input = document.querySelector('input[name="input_file"]');
+  if (!dropzone || !input) return;
+
+  ["dragenter", "dragover"].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dropzone.classList.add("is-dragging");
+    });
+  });
+
+  ["dragleave", "drop"].forEach((eventName) => {
+    dropzone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dropzone.classList.remove("is-dragging");
+    });
+  });
+
+  dropzone.addEventListener("drop", (event) => {
+    const files = Array.from(event.dataTransfer?.files || []);
+    const xyzFile = files.find((file) => file.name.toLowerCase().endsWith(".xyz"));
+    if (!xyzFile) {
+      setFilePreviewState({
+        mode: "error",
+        title: "No compatible data found",
+        summary: "Drop data ending in .xyz.",
+        placeholder: "Drop .xyz data",
+      });
+      return;
+    }
+    if (assignDroppedFile(input, xyzFile)) {
+      previewSelectedFile();
+    }
+  });
+}
+
 function renderHintText(job) {
   const renderToggle = document.querySelector('input[name="enable_render"]');
   if (!window.WEBUI_BOOTSTRAP?.blenderAvailable) {
@@ -328,36 +393,21 @@ function applyLayoutState() {
   const appShell = document.querySelector(".app-shell");
   const sidebar = document.getElementById("left-sidebar");
   const sidebarToggle = document.getElementById("toggle-sidebar");
-  const grid = document.querySelector(".workspace-grid");
-  const jobsPanel = document.getElementById("jobs-panel");
-  const toggleButton = document.getElementById("toggle-jobs-panel");
 
   if (appShell && sidebar && sidebarToggle) {
     appShell.classList.toggle("sidebar-collapsed", state.ui.sidebarCollapsed);
     sidebar.classList.toggle("is-collapsed", state.ui.sidebarCollapsed);
-    sidebarToggle.textContent = state.ui.sidebarCollapsed ? "Open" : "Fold";
+    sidebarToggle.textContent = state.ui.sidebarCollapsed ? "\u2192" : "\u2190";
     sidebarToggle.setAttribute("aria-expanded", String(!state.ui.sidebarCollapsed));
     sidebarToggle.setAttribute(
       "aria-label",
       state.ui.sidebarCollapsed ? "Expand navigation rail" : "Collapse navigation rail"
     );
   }
-
-  if (grid && jobsPanel && toggleButton) {
-    grid.classList.toggle("jobs-collapsed", state.ui.jobsCollapsed);
-    jobsPanel.classList.toggle("is-collapsed", state.ui.jobsCollapsed);
-    toggleButton.textContent = state.ui.jobsCollapsed ? "Open" : "Fold";
-    toggleButton.setAttribute("aria-expanded", String(!state.ui.jobsCollapsed));
-  }
 }
 
 function toggleSidebar() {
   state.ui.sidebarCollapsed = !state.ui.sidebarCollapsed;
-  applyLayoutState();
-}
-
-function toggleJobsPanel() {
-  state.ui.jobsCollapsed = !state.ui.jobsCollapsed;
   applyLayoutState();
 }
 
@@ -369,6 +419,8 @@ function toggleDetailSection(sectionKey) {
 
 function renderJobs() {
   const list = document.getElementById("jobs-list");
+  if (!list) return;
+
   if (!state.jobs.length) {
     list.innerHTML = `<div class="empty-state">No jobs yet.</div>`;
     return;
@@ -413,6 +465,7 @@ function renderJobs() {
       state.selectedJobId = card.dataset.jobId;
       renderJobs();
       applyRenderActionState();
+      renderFixedProgress();
       fetchJobDetail();
     });
   });
@@ -461,8 +514,51 @@ function renderArtifacts(job) {
   `;
 }
 
-function renderPreviews(job) {
+function primaryAnalysisPreview(job) {
   const previews = (job.artifacts || []).filter((artifact) => artifact.preview_url);
+  if (job.status !== "completed" || !previews.length) return null;
+  return (
+    previews.find((artifact) => /analysis/i.test(artifact.label) || /analysis/i.test(artifact.name)) ||
+    previews[0]
+  );
+}
+
+function renderPrimaryAnalysisImage(job) {
+  const artifact = primaryAnalysisPreview(job);
+  if (!artifact) return "";
+
+  return `
+    <section class="primary-analysis-preview">
+      <button
+        type="button"
+        class="preview-image-button"
+        data-preview-open="${escapeHtml(artifact.preview_url)}"
+        data-preview-title="${escapeHtml(artifact.label)}"
+        data-preview-download="${escapeHtml(artifact.download_url)}"
+      >
+        <img src="${artifact.preview_url}" alt="${escapeHtml(artifact.label)}">
+      </button>
+      <div class="preview-actions">
+        <button
+          type="button"
+          class="panel-collapse"
+          data-preview-open="${escapeHtml(artifact.preview_url)}"
+          data-preview-title="${escapeHtml(artifact.label)}"
+          data-preview-download="${escapeHtml(artifact.download_url)}"
+        >
+          Expand
+        </button>
+        <a class="button-link secondary-button" href="${artifact.download_url}" download>Download</a>
+      </div>
+    </section>
+  `;
+}
+
+function renderPreviews(job) {
+  const primary = primaryAnalysisPreview(job);
+  const previews = (job.artifacts || []).filter(
+    (artifact) => artifact.preview_url && artifact !== primary
+  );
   if (!previews.length) return "";
 
   return `
@@ -502,6 +598,34 @@ function renderPreviews(job) {
           .join("")}
       </div>
     </section>
+  `;
+}
+
+function renderFixedProgress() {
+  const progress = document.getElementById("fixed-progress");
+  if (!progress) return;
+
+  const job = getSelectedJob();
+  if (!job) {
+    progress.className = "fixed-progress is-empty";
+    progress.innerHTML = "";
+    return;
+  }
+
+  const tone = statusTone(job.status);
+  progress.className = "fixed-progress";
+  progress.innerHTML = `
+    <div class="fixed-progress-head">
+      <span>${escapeHtml(job.message || titleCase(job.stage || job.status || "queued"))}</span>
+      <span class="status-badge ${tone}">${escapeHtml(titleCase(job.status))}</span>
+    </div>
+    <div class="progress-shell">
+      <div class="progress-bar" style="width:${job.progress || 0}%"></div>
+    </div>
+    <div class="job-meta">
+      <span>${escapeHtml(job.source_name || "")}</span>
+      <span>${escapeHtml(formatPercent(job.progress))}</span>
+    </div>
   `;
 }
 
@@ -587,6 +711,7 @@ function renderJobDetail(job) {
   if (!job) {
     detail.innerHTML = `<div class="empty-state">Select a job to see progress, stats, previews, and downloads.</div>`;
     state.detailJobId = null;
+    renderFixedProgress();
     return;
   }
 
@@ -609,15 +734,13 @@ function renderJobDetail(job) {
           <span class="status-badge ${tone}">${escapeHtml(titleCase(job.status))}</span>
         </div>
 
-        <div class="progress-shell">
-          <div class="progress-bar" style="width:${job.progress || 0}%"></div>
-        </div>
-
         <div class="job-meta">
           <span>${escapeHtml(job.message || "")}</span>
           <span>${escapeHtml(formatPercent(job.progress))}</span>
         </div>
       </section>
+
+      ${renderPrimaryAnalysisImage(job)}
 
       <div class="detail-grid">
         ${renderCollapsibleSection("stats", "Stats Summary", "Surface metrics", renderStats(job))}
@@ -641,6 +764,7 @@ function renderJobDetail(job) {
   refreshOpenImageModal(job);
   restoreLogScrollState(detail.querySelector("[data-log-scroll]"), sameJob);
   applyRenderActionState();
+  renderFixedProgress();
 }
 
 function openImageModal({ src, title, downloadUrl }) {
@@ -1385,6 +1509,7 @@ async function fetchJobs() {
     state.selectedJobId = state.jobs[0].id;
   }
   renderJobs();
+  renderFixedProgress();
   applyRenderActionState();
 }
 
@@ -1427,6 +1552,7 @@ async function submitJob(event) {
     resetFilePreview();
     syncRenderControls();
     status.textContent = `Queued job ${response.job.id}`;
+    renderFixedProgress();
     await poll();
   } catch (error) {
     status.textContent = error.message;
@@ -1438,11 +1564,7 @@ async function submitJob(event) {
 function bootstrap() {
   document.getElementById("job-form").addEventListener("submit", submitJob);
   document.getElementById("refresh-jobs").addEventListener("click", poll);
-  document.getElementById("focus-form").addEventListener("click", () => scrollPanelIntoView("form-panel"));
-  document.getElementById("focus-jobs").addEventListener("click", () => scrollPanelIntoView("jobs-panel"));
-  document.getElementById("focus-detail").addEventListener("click", () => scrollPanelIntoView("detail-panel"));
   document.getElementById("toggle-sidebar").addEventListener("click", toggleSidebar);
-  document.getElementById("toggle-jobs-panel").addEventListener("click", toggleJobsPanel);
   document.getElementById("rerender-button").addEventListener("click", rerenderSelectedJob);
   document.getElementById("load-render-settings").addEventListener("click", () => {
     const job = getSelectedJob();
@@ -1479,6 +1601,7 @@ function bootstrap() {
   bindImageModal();
   bindRenderPreviewModal();
   bindRenderPreviewModalControls();
+  bindFileDropzone();
   resetFilePreview();
   syncRenderControls();
   applyLayoutState();

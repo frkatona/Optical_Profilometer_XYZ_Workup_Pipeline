@@ -43,12 +43,12 @@ In the UI, Blender controls stay folded until `Render an exported OBJ after anal
 The included `docker-bake.hcl` builds the two primary images for `linux/amd64` and `linux/arm64`:
 
 ```powershell
-$env:REGISTRY_IMAGE="your-dockerhub-user/optical-profilometer"
-$env:VERSION="1.0"
+$env:REGISTRY_IMAGE="anthonykatona/optical-profilometer"
+$env:VERSION="1.1"
 docker buildx bake --push
 ```
 
-This publishes `${REGISTRY_IMAGE}:1.0` for the default no-Blender Web UI and `${REGISTRY_IMAGE}:1.0-blender` for the Blender-enabled Web UI.
+This publishes `${REGISTRY_IMAGE}:1.1` for the default no-Blender Web UI and `${REGISTRY_IMAGE}:1.1-blender` for the Blender-enabled Web UI.
 
 ### Optional CLI Targets
 
